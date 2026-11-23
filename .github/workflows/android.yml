@@ -1,8 +1,12 @@
 name: android
 
-# Started by hand (Actions tab, or `gh workflow run android -r port`) when a
-# tester needs an APK; pushes do not build one.
+# Every push to the port branch builds the release APK and publishes it on the
+# "latest" release (https://github.com/tib-kpl/MetroidPrime2Port/releases/tag/latest),
+# replacing the previous one. Can also be started by hand (Actions tab, or
+# `gh workflow run android -r port`).
 on:
+  push:
+    branches: [port]
   workflow_dispatch:
 
 # Only the newest run per branch matters.
@@ -10,9 +14,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Nothing here writes to the repository.
+# contents: write is for the "latest" tag and release, nothing else.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   apk:
@@ -58,7 +62,7 @@ jobs:
           apk=android/app/build/outputs/apk/release/app-release.apk
           digest=$("$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
           echo "signer: $digest"
-          test "$digest" = 5c380a13d5bfc5c57a093a22d2ec70d62109a927f76b0bf7fe61db7d5428bd20
+          test "$digest" = 180e4c80415ffc0cff8e9e1d349a5d671e3c6d5ba600113019866ee58b1cf707
           version=$(sed -n 's/.*versionName "\(.*\)".*/\1/p' android/app/build.gradle)
           mkdir dist
           cp "$apk" "dist/metroid-prime2-port-$version-${GITHUB_SHA::9}.apk"
@@ -67,3 +71,20 @@ jobs:
           name: android-apk
           path: dist/*.apk
           if-no-files-found: error
+      # One rolling release: the tag follows the commit, the previous APK goes.
+      - name: Publish on the latest release
+        if: github.event_name == 'push' || github.ref_name == github.event.repository.default_branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -f latest "$GITHUB_SHA"
+          git push -f origin refs/tags/latest
+          notes="Release APK built from ${GITHUB_SHA::9} ($(git log -1 --format=%s))."
+          if gh release view latest > /dev/null 2>&1; then
+            gh release edit latest --title "Latest build" --notes "$notes" --latest
+            gh release view latest --json assets --jq '.assets[].name' |
+              while read -r name; do gh release delete-asset latest "$name" --yes; done
+          else
+            gh release create latest --verify-tag --title "Latest build" --notes "$notes" --latest
+          fi
+          gh release upload latest dist/*.apk --clobber

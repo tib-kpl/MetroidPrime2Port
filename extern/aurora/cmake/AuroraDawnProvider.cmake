@@ -125,6 +125,8 @@ if (_aurora_dawn_provider STREQUAL "vendor")
     if (CMAKE_SYSTEM_NAME STREQUAL Linux)
       set(DAWN_USE_WAYLAND ON CACHE INTERNAL "Enable support for Wayland surface")
     endif ()
+    # Only the fuzzers need protobuf, and cross-compiling it wants a host protoc.
+    set(DAWN_BUILD_PROTOBUF OFF CACHE INTERNAL "Build protobuf (fuzzers only)")
     set(TINT_BUILD_TESTS OFF CACHE INTERNAL "Build tests")
     set(TINT_BUILD_CMD_TOOLS OFF CACHE INTERNAL "Build the Tint command line tools")
     if (NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY OR CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "DLL$")

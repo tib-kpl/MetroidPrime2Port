@@ -13,8 +13,8 @@
 #include "port_save_framing.h"
 
 #ifdef TARGET_PC
-#include <SDL2/SDL_messagebox.h>
-#include <SDL2/SDL_video.h>
+#include <SDL3/SDL_messagebox.h>
+#include <SDL3/SDL_video.h>
 #include <aurora/card.h>
 #include <cstdio>
 #include <cstdlib>
@@ -446,7 +446,10 @@ static void OfferRestoreFromOtherRelease() {
   if (others.empty()) {
     return;
   }
-  SDL_Window* window = SDL_GetWindowFromID(1);
+  int windowCount = 0;
+  SDL_Window** windows = SDL_GetWindows(&windowCount);
+  SDL_Window* window = windows != nullptr && windowCount > 0 ? windows[0] : nullptr;
+  SDL_free(windows);
   if (window == nullptr) {
     return;
   }

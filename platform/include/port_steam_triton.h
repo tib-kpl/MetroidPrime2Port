@@ -20,7 +20,11 @@ namespace PortSteamTriton {
 // The HID client runs on Linux (desktop and the Steam Deck) only, where it is tested; elsewhere
 // Update does nothing and the F1 page hides the back-button setting. The report
 // parsing below is platform independent (and unit tested everywhere).
+#if defined(__linux__) && !defined(__ANDROID__)
+constexpr bool kAvailable = true;
+#else
 constexpr bool kAvailable = false;
+#endif
 
 constexpr uint16_t kVendor = 0x28de;
 // Wired, Bluetooth, the USB puck and the internal adapter.

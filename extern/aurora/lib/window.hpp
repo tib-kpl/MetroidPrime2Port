@@ -42,8 +42,6 @@ const AuroraEvent* poll_events();
 uint64_t joystick_update_ns() noexcept;
 SDL_Window* get_sdl_window();
 void* get_kmsdrm_egl_surface(SDL_Window* window) noexcept;
-void* get_kmsdrm_egl_display() noexcept;
-void* get_kmsdrm_egl_proc(const char* proc) noexcept;
 bool make_kmsdrm_gl_context_current(bool current) noexcept;
 SDL_Renderer* get_sdl_renderer();
 const void* get_native_window_handle() noexcept;

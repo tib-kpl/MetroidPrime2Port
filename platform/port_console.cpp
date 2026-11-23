@@ -10,7 +10,7 @@
 #include "MetroidPrime/CAutoMapper.hpp"
 #include "MetroidPrime/CMain.hpp"
 #include "MetroidPrime/CMapWorldInfo.hpp"
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <dolphin/pad.h>
 #include "port_harness.h"
 #include "port_vpads.h"
@@ -2215,24 +2215,23 @@ void CmdIgt(CStateManager&, const Args& args, std::string& out) {
 // Pushes one SDL finger event at window pixel x,y, as a touch screen would: the touch overlay's
 // event filter sees it as it is pushed. Tests the touch overlay on a desktop build (MP1's `finger`).
 bool PushFinger(Uint32 type, SDL_FingerID id, float x, float y) {
-  SDL_Window* window = SDL_GetWindowFromID(1);
+  int count = 0;
+  SDL_Window** windows = SDL_GetWindows(&count);
+  SDL_Window* window = windows != nullptr && count > 0 ? windows[0] : nullptr;
+  SDL_free(windows);
   int w = 0;
   int h = 0;
-  if (window == nullptr) {
-    return false;
-  }
-  SDL_GetWindowSize(window, &w, &h);
-  if (w <= 0 || h <= 0) {
+  if (window == nullptr || !SDL_GetWindowSizeInPixels(window, &w, &h) || w <= 0 || h <= 0) {
     return false;
   }
   SDL_Event e{};
   e.type = type;
-  e.tfinger.timestamp = SDL_GetTicks();
-  e.tfinger.touchId = 1;
-  e.tfinger.fingerId = id;
+  e.tfinger.timestamp = SDL_GetTicksNS();
+  e.tfinger.touchID = 1;
+  e.tfinger.fingerID = id;
   e.tfinger.x = x / float(w);
   e.tfinger.y = y / float(h);
-  e.tfinger.pressure = type == SDL_FINGERUP ? 0.f : 1.f;
+  e.tfinger.pressure = type == SDL_EVENT_FINGER_UP ? 0.f : 1.f;
   e.tfinger.windowID = SDL_GetWindowID(window);
   SDL_PushEvent(&e);
   return true;
@@ -2242,22 +2241,23 @@ void CmdFinger(CStateManager&, const Args& args, std::string&) {
   const auto num = [&](size_t i) { return ArgFloat(args[i]); };
   bool ok = true;
   if (args.size() == 5 && (args[1] == "down" || args[1] == "move" || args[1] == "up")) {
-    const Uint32 type = args[1] == "down" ? SDL_FINGERDOWN
-              : args[1] == "move" ? SDL_FINGERMOTION
-                        : SDL_FINGERUP;
+    const Uint32 type = args[1] == "down" ? SDL_EVENT_FINGER_DOWN
+                        : args[1] == "move" ? SDL_EVENT_FINGER_MOTION
+                                            : SDL_EVENT_FINGER_UP;
     ok = PushFinger(type, SDL_FingerID(std::atoll(std::string(args[2]).c_str())), num(3), num(4));
   } else if (args.size() == 4 && args[1] == "tap") {
-    ok = PushFinger(SDL_FINGERDOWN, 1, num(2), num(3)) && PushFinger(SDL_FINGERUP, 1, num(2), num(3));
+    ok = PushFinger(SDL_EVENT_FINGER_DOWN, 1, num(2), num(3)) &&
+         PushFinger(SDL_EVENT_FINGER_UP, 1, num(2), num(3));
   } else if ((args.size() == 6 || args.size() == 7) && args[1] == "drag") {
     const int steps = args.size() == 7 ? std::max(1, ArgInt(args[6])) : 10;
     const float x0 = num(2), y0 = num(3), x1 = num(4), y1 = num(5);
-    ok = PushFinger(SDL_FINGERDOWN, 1, x0, y0);
+    ok = PushFinger(SDL_EVENT_FINGER_DOWN, 1, x0, y0);
     for (int i = 1; ok && i <= steps; ++i) {
       const float t = float(i) / float(steps);
-      PushFinger(SDL_FINGERMOTION, 1, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+      PushFinger(SDL_EVENT_FINGER_MOTION, 1, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
     }
     if (ok) {
-      PushFinger(SDL_FINGERUP, 1, x1, y1);
+      PushFinger(SDL_EVENT_FINGER_UP, 1, x1, y1);
     }
   } else {
     Usage();
@@ -5775,7 +5775,10 @@ void CmdPipeTrim(CStateManager&, const Args& args, std::string& out) {
 }
 
 void CmdWindow(CStateManager&, const Args& args, std::string& out) {
-  SDL_Window* window = SDL_GetWindowFromID(1);
+  int count = 0;
+  SDL_Window** windows = SDL_GetWindows(&count);
+  SDL_Window* window = windows != nullptr && count > 0 ? windows[0] : nullptr;
+  SDL_free(windows);
   if (window == nullptr) {
     Fail("no window");
     return;
@@ -5789,10 +5792,11 @@ void CmdWindow(CStateManager&, const Args& args, std::string& out) {
     }
     SDL_SetWindowFullscreen(window, false);
     SDL_SetWindowSize(window, w, h);
+    SDL_SyncWindow(window);
   }
   int w = 0;
   int h = 0;
-  SDL_GetWindowSize(window, &w, &h);
+  SDL_GetWindowSizeInPixels(window, &w, &h);
   out += "window " + std::to_string(w) + "x" + std::to_string(h) + "\n";
 }
 

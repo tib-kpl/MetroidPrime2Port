@@ -2,7 +2,6 @@
 #define DOLPHIN_PAD_H
 
 #include <dolphin/types.h>
-#include <SDL2/SDL_gamecontroller.h>
 
 #define PAD_SPEC_0 0
 #define PAD_SPEC_1 1
@@ -228,7 +227,7 @@ BOOL PADIsGCAdapter(u32 port);
 /**
  * Returns the SDL gamepad for the index into the controller map.
  */
-SDL_GameController* PADGetSDLGamepadForIndex(u32 index);
+struct SDL_Gamepad* PADGetSDLGamepadForIndex(u32 index);
 /* Returns the first native button which is currently pressed */
 s32 PADGetNativeButtonPressed(u32 port);
 /* Returns the first native axis which is currently pulled halfway or more */

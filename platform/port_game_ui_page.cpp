@@ -15,7 +15,7 @@
 #include "port_mouse.h"
 #include "port_overlay.h"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <dolphin/pad.h>
 
 #include <algorithm>
@@ -75,41 +75,37 @@ uint16_t sPrevButtons = 0;
 PortGameUiMath::Repeat sRepeat;
 float sPrevX = -1.f, sPrevY = -1.f;
 
-int SDLCALL ClickWatch(void*, SDL_Event* event) {
-  if (event->type == SDL_MOUSEWHEEL) {
+bool SDLCALL ClickWatch(void*, SDL_Event* event) {
+  if (event->type == SDL_EVENT_MOUSE_WHEEL) {
     if (sAnyOpen.load()) {
       std::lock_guard< std::mutex > lock(sInputMutex);
       sWheel += event->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event->wheel.y : event->wheel.y;
     }
-    return 1;
+    return true;
   }
-  if (event->type != SDL_MOUSEBUTTONDOWN && event->type != SDL_MOUSEBUTTONUP) {
-    return 1;
+  if (event->type != SDL_EVENT_MOUSE_BUTTON_DOWN && event->type != SDL_EVENT_MOUSE_BUTTON_UP) {
+    return true;
   }
   const SDL_MouseButtonEvent& b = event->button;
   SDL_Window* window = SDL_GetWindowFromID(b.windowID);
   int w = 0, h = 0;
-  if (!sAnyOpen.load() || window == nullptr) {
-    return 1;
+  if (!sAnyOpen.load() || window == nullptr || !SDL_GetWindowSize(window, &w, &h) || w <= 0 || h <= 0) {
+    return true;
   }
-  SDL_GetWindowSize(window, &w, &h);
-  if (w <= 0 || h <= 0) return 1;
   std::lock_guard< std::mutex > lock(sInputMutex);
-  const bool down = b.state == SDL_PRESSED;
-  if (b.button == SDL_BUTTON_RIGHT && down) {
+  if (b.button == SDL_BUTTON_RIGHT && b.down) {
     sRightDown = true;
   } else if (b.button == SDL_BUTTON_LEFT && sClicks.size() < 32) {
-    sClicks.push_back({down, b.x / static_cast< float >(w), b.y / static_cast< float >(h)});
+    sClicks.push_back({b.down, b.x / static_cast< float >(w), b.y / static_cast< float >(h)});
   }
-  return 1;
+  return true;
 }
 
 // A new page: what is already held (the binding that opened it) is not a press.
 void ResetInput() {
   static bool sWatching = false;
   if (!sWatching) {
-    SDL_AddEventWatch(ClickWatch, nullptr);
-    sWatching = true;
+    sWatching = SDL_AddEventWatch(ClickWatch, nullptr);
   }
   std::lock_guard< std::mutex > lock(sInputMutex);
   sClicks.clear();
@@ -175,11 +171,8 @@ PageInput TakeInput() {
   // The pointer, over the window it is in.
   SDL_Window* window = SDL_GetMouseFocus();
   int w = 0, h = 0;
-  if (window != nullptr) {
-    SDL_GetWindowSize(window, &w, &h);
-  }
-  if (w > 0 && h > 0) {
-    int px = 0, py = 0;
+  if (window != nullptr && SDL_GetWindowSize(window, &w, &h) && w > 0 && h > 0) {
+    float px = 0.f, py = 0.f;
     SDL_GetMouseState(&px, &py);
     in.pointerX = px / static_cast< float >(w);
     in.pointerY = py / static_cast< float >(h);

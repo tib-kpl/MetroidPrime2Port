@@ -16,15 +16,15 @@
 #include "MetroidPrime/TCastTo.hpp"
 #include <dolphin/gx/GXAurora.h>
 #include <dolphin/vi.h>
-#include <SDL2/SDL_mouse.h>
-#include <SDL2/SDL_timer.h>
+#include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_timer.h>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #if defined(__ANDROID__)
-#include <SDL2/SDL_system.h>
+#include <SDL3/SDL_system.h>
 #include <filesystem>
 #include <jni.h>
 #endif

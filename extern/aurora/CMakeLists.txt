@@ -36,9 +36,12 @@ set_property(CACHE AURORA_DAWN_PROVIDER PROPERTY STRINGS auto vendor system pack
 set(AURORA_DAWN_LINKAGE "${_default_linkage}" CACHE STRING "Dawn linkage type preference")
 set_property(CACHE AURORA_DAWN_LINKAGE PROPERTY STRINGS shared static)
 
-# SDL2
-set(AURORA_SDL2_PROVIDER "system" CACHE STRING "How to provide SDL2: system")
-set_property(CACHE AURORA_SDL2_PROVIDER PROPERTY STRINGS system)
+# SDL3
+set(AURORA_SDL3_PROVIDER "${_default_provider}" CACHE STRING
+  "How to provide SDL3: auto, vendor (build from source), system (find_package/imported), or package (download prebuilt)")
+set_property(CACHE AURORA_SDL3_PROVIDER PROPERTY STRINGS auto vendor system package)
+set(AURORA_SDL3_LINKAGE "${_default_linkage}" CACHE STRING "SDL3 linkage type preference")
+set_property(CACHE AURORA_SDL3_LINKAGE PROPERTY STRINGS shared static)
 
 # nod (if AURORA_ENABLE_DVD)
 set(AURORA_NOD_PROVIDER "${_default_provider}" CACHE STRING

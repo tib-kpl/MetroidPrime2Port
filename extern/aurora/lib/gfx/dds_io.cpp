@@ -399,7 +399,7 @@ std::optional<MipTail> load_dds_mip_tail(const std::filesystem::path& path, uint
   if (!file) {
     return std::nullopt;
   }
-  const Sint64 end = SDL_RWsize(file.get());
+  const Sint64 end = SDL_GetIOSize(file.get());
   if (end <= 0 || static_cast<uint64_t>(end) > SIZE_MAX) {
     return std::nullopt;
   }

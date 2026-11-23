@@ -15,9 +15,9 @@
 
 #include <imgui.h>
 #include <jni.h>
-#include <SDL2/SDL_filesystem.h>
-#include <SDL2/SDL_system.h>
-#include <SDL2/SDL_timer.h>
+#include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_system.h>
+#include <SDL3/SDL_timer.h>
 
 #include <cinttypes>
 #include <cstdio>

@@ -16,7 +16,7 @@
 #include <fstream>
 #include <set>
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL_filesystem.h>
 
 // The store half of port_input_user_presets.h: the files, and the live Aurora
 // mappings and mouse settings a preset snapshots and restores. The built-in

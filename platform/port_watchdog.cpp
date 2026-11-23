@@ -7,7 +7,7 @@
 #include <aurora/aurora.h>
 #include <aurora/phase.hpp>
 
-#include <SDL2/SDL_timer.h>
+#include <SDL3/SDL_timer.h>
 
 #include <algorithm>
 #include <atomic>

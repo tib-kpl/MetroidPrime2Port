@@ -14,10 +14,10 @@
 
 #include <dolphin/pad.h>
 #include <imgui.h>
-#include <SDL2/SDL_gamecontroller.h>
-#include <SDL2/SDL_joystick.h>
-#include <SDL2/SDL_scancode.h>
-#include <SDL2/SDL_timer.h>
+#include <SDL3/SDL_gamepad.h>
+#include <SDL3/SDL_joystick.h>
+#include <SDL3/SDL_scancode.h>
+#include <SDL3/SDL_timer.h>
 
 #include <algorithm>
 #include <atomic>
@@ -453,7 +453,7 @@ void DrawIcon(ImDrawList* dl, ImVec2 p, float s, Icon icon, ImU32 col) {
 }
 
 // An input's name without its "kind:" (the icon says it).
-// Pad buttons by raw bit (SDL_GameControllerButton, then the triggers' pulls and clicks). The paddles get
+// Pad buttons by raw bit (SDL_GamepadButton, then the triggers' pulls and clicks). The paddles get
 // a Steam Controller's or Deck's back-button names too (PaddleLabel).
 constexpr const char* kPadButtonLabels[] = {
     "A",       "B",        "X",        "Y",        "Back",     "Guide",    "Start",     "Left stick",
@@ -462,16 +462,16 @@ constexpr const char* kPadButtonLabels[] = {
     "Misc 5",  "Misc 6",   "LT",       "RT",       "LT click", "RT click",
 };
 
-// SDL2's four paddles (upper-left, upper-right, lower-left, lower-right), with the back
+// SDL's four paddles (right paddle 1, left paddle 1, right paddle 2, left paddle 2), with the back
 // buttons' names (R4, L4, R5, L5) when the edited player's controller is a Steam Controller or a
 // Steam Deck. A Steam Input virtual pad reports the real controller's vendor (SDL reads it from
 // Steam's slot info).
 std::string PaddleLabel(unsigned paddle) {
-  static constexpr const char* kValve[] = {"L4", "R4", "L5", "R5"};
+  static constexpr const char* kValve[] = {"R4", "L4", "R5", "L5"};
   const std::string plain = "Paddle " + std::to_string(paddle + 1);
   const s32 index = PADGetIndexForPort(static_cast< u32 >(EditPort()));
-  SDL_GameController* pad = index >= 0 ? PADGetSDLGamepadForIndex(static_cast< u32 >(index)) : nullptr;
-  if (pad == nullptr || paddle >= 4 || SDL_GameControllerGetVendor(pad) != 0x28de) {
+  SDL_Gamepad* pad = index >= 0 ? PADGetSDLGamepadForIndex(static_cast< u32 >(index)) : nullptr;
+  if (pad == nullptr || paddle >= 4 || SDL_GetGamepadVendor(pad) != 0x28de) {
     return plain;
   }
   return plain + " (" + kValve[paddle] + ")";
@@ -496,9 +496,9 @@ std::string InputName(const Input& in, bool includeMouseMode = false) {
   const std::string text = PortInput::InputToText(in);
   const size_t at = text.find('@');
   const std::string threshold = at == std::string::npos ? std::string() : " " + text.substr(at + 1) + "%";
-  if (in.device == Device::PadButton && in.code >= SDL_CONTROLLER_BUTTON_PADDLE1 &&
-      in.code <= SDL_CONTROLLER_BUTTON_PADDLE4) {
-    return PaddleLabel(in.code - SDL_CONTROLLER_BUTTON_PADDLE1) + threshold;
+  if (in.device == Device::PadButton && in.code >= SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1 &&
+      in.code <= SDL_GAMEPAD_BUTTON_LEFT_PADDLE2) {
+    return PaddleLabel(in.code - SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1) + threshold;
   }
   if (in.device == Device::PadButton && in.code < std::size(kPadButtonLabels)) {
     return kPadButtonLabels[in.code] + threshold;
@@ -1936,7 +1936,7 @@ void DrawPortController(u32 port, const char* label) {
     }
     if (noneSelected) ImGui::SetItemDefaultFocus();
     for (u32 index = 0; index < count; ++index) {
-      SDL_GameController* pad = PADGetSDLGamepadForIndex(index);
+      SDL_Gamepad* pad = PADGetSDLGamepadForIndex(index);
       const char* name = PADGetNameForControllerIndex(index);
       ImGui::PushID(static_cast<int>(index));
       const bool selected = static_cast<s32>(index) == activeIndex;
@@ -1951,8 +1951,8 @@ void DrawPortController(u32 port, const char* label) {
       }
       if (selected) ImGui::SetItemDefaultFocus();
       if (pad != nullptr) {
-        ImGui::SetItemTooltip("SDL device %u%s", SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad)),
-                  SDL_GameControllerGetType(pad) == SDL_CONTROLLER_TYPE_VIRTUAL ? " (virtual/touch)" : "");
+        ImGui::SetItemTooltip("SDL device %u%s", SDL_GetGamepadID(pad),
+                              SDL_IsJoystickVirtual(SDL_GetGamepadID(pad)) ? " (virtual/touch)" : "");
       }
       ImGui::PopID();
     }

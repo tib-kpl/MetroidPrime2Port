@@ -30,8 +30,10 @@
 #include "thread.hpp"
 #include "window.hpp"
 
-#include <SDL2/SDL.h>
-#include <png.h>
+#include <SDL3/SDL_init.h>
+#include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_messagebox.h>
+#include <SDL3/SDL_surface.h>
 #include <magic_enum.hpp>
 
 #include <algorithm>
@@ -42,7 +44,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
-#include <vector>
 
 #include "system_info.hpp"
 #include "tracy/Tracy.hpp"
@@ -56,33 +57,6 @@ char g_gameName[4];
 
 namespace {
 constexpr Module Log{"aurora"};
-
-bool save_screenshot_png(const std::string& path, uint32_t width, uint32_t height, uint32_t bytesPerRow,
-                         const void* pixels, bool bgra) {
-  std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4);
-  const auto* source = static_cast<const uint8_t*>(pixels);
-  for (uint32_t y = 0; y < height; ++y) {
-    for (uint32_t x = 0; x < width; ++x) {
-      const uint8_t* src = source + static_cast<size_t>(y) * bytesPerRow + x * 4;
-      uint8_t* dst = rgba.data() + (static_cast<size_t>(y) * width + x) * 4;
-      dst[0] = src[bgra ? 2 : 0];
-      dst[1] = src[1];
-      dst[2] = src[bgra ? 0 : 2];
-      dst[3] = 0xff;
-    }
-  }
-  png_image image{};
-  image.version = PNG_IMAGE_VERSION;
-  image.width = width;
-  image.height = height;
-  image.format = PNG_FORMAT_RGBA;
-  const bool saved = png_image_write_to_file(&image, path.c_str(), 0, rgba.data(), width * 4, nullptr) != 0;
-  if (!saved) {
-    SDL_SetError("libpng: %s", image.message);
-  }
-  png_image_free(&image);
-  return saved;
-}
 
 #ifdef AURORA_ENABLE_GX
 std::atomic_bool g_screenshotRequested;
@@ -189,13 +163,14 @@ void record_screenshot(wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubm
           }
 
           const void* pixels = readback.GetConstMappedRange(0, byteSize);
-            const Uint32 redMask = bgra ? 0x00ff0000 : 0x000000ff;
-            const Uint32 greenMask = 0x0000ff00;
-            const Uint32 blueMask = bgra ? 0x000000ff : 0x00ff0000;
-            SDL_Surface* surface = SDL_CreateRGBSurfaceFrom(const_cast<void*>(pixels), static_cast<int>(width),
-                                    static_cast<int>(height), 32,
-                                    static_cast<int>(bytesPerRow), redMask, greenMask,
-                                    blueMask, 0);
+          // The present source's alpha is not meaningful and is usually 0, so a surface with an
+          // alpha channel saves an image every viewer shows as fully transparent (a 32-bit BMP
+          // with an alpha mask, or a PNG whose alpha is 0). The X formats drop it: SDL writes a
+          // 24-bit BMP and converts to opaque RGBA for PNG.
+          SDL_Surface* surface = SDL_CreateSurfaceFrom(
+              static_cast<int>(width), static_cast<int>(height),
+              bgra ? SDL_PIXELFORMAT_BGRX32 : SDL_PIXELFORMAT_RGBX32, const_cast<void*>(pixels),
+              static_cast<int>(bytesPerRow));
           if (surface == nullptr) {
             Log.warn("Unable to create screenshot surface: {}", SDL_GetError());
             if (png) {
@@ -204,7 +179,7 @@ void record_screenshot(wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubm
           } else if (png) {
             std::error_code ec;
             std::filesystem::create_directories(std::filesystem::path(pngPath).parent_path(), ec);
-            if (!save_screenshot_png(pngPath, width, height, bytesPerRow, pixels, bgra)) {
+            if (!SDL_SavePNG(surface, pngPath.c_str())) {
               Log.warn("Unable to save screenshot {}: {}", pngPath, SDL_GetError());
               g_pngState.store(-1, std::memory_order_release);
             } else {
@@ -213,18 +188,18 @@ void record_screenshot(wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubm
               g_pngHeight.store(height, std::memory_order_relaxed);
               g_pngState.store(1, std::memory_order_release);
             }
-            SDL_FreeSurface(surface);
+            SDL_DestroySurface(surface);
           } else {
             std::error_code ec;
             std::filesystem::create_directories("screenshots", ec);
             const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
             const std::string path = "screenshots/metroid-prime-" + std::to_string(stamp) + ".bmp";
-            if (SDL_SaveBMP(surface, path.c_str()) != 0) {
+            if (!SDL_SaveBMP(surface, path.c_str())) {
               Log.warn("Unable to save screenshot {}: {}", path, SDL_GetError());
             } else {
               Log.info("Screenshot saved to {}", path);
             }
-            SDL_FreeSurface(surface);
+            SDL_DestroySurface(surface);
           }
           readback.Unmap();
         });

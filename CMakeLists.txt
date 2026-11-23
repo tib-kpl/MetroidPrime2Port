@@ -622,7 +622,7 @@ else()
     message(STATUS "OpenSSL not found: https:// disabled")
 endif()
 
-if(AURORA_SDL_TARGET)
+if(AURORA_SDL3_TARGET)
     add_library(mp_port_audio OBJECT platform/ai_dma.cpp platform/port_controls.cpp
         platform/port_save.cpp platform/port_save_convert.cpp platform/port_save_trilogy.cpp platform/port_save_trilogy_payload.cpp platform/port_savestate.cpp platform/port_beam_ammo.cpp platform/port_savestate_room.cpp platform/port_savestate_fields.cpp platform/port_entity_schema.cpp platform/port_statedump.cpp platform/port_savestate_format.cpp platform/port_randomizer.cpp platform/port_rando_gen.cpp platform/port_rando_models.cpp platform/port_rando_world.cpp platform/port_rando_logic.cpp platform/port_logfile.cpp platform/port_breadcrumb.cpp platform/port_pickup_presentation.cpp
         platform/port_crash.cpp platform/port_watchdog.cpp platform/port_motion_watch.cpp platform/port_memory_log.cpp platform/port_storage_report.cpp
@@ -656,7 +656,7 @@ if(AURORA_SDL_TARGET)
         extern/aurora/include
         extern/musyx-port/include
         include
-        $<TARGET_PROPERTY:${AURORA_SDL_TARGET},INTERFACE_INCLUDE_DIRECTORIES>)
+        $<TARGET_PROPERTY:${AURORA_SDL3_TARGET},INTERFACE_INCLUDE_DIRECTORIES>)
     target_compile_definitions(mp_port_audio PRIVATE TARGET_PC AURORA
         MUSY_TARGET=MUSY_TARGET_PC)
     if(MP_PORT_COVERAGE)
@@ -678,22 +678,22 @@ if(AURORA_SDL_TARGET)
     mp_signed_char(mp_port_audio)
     mp_websocket_tls(mp_port_audio)
     # aurora::core carries ImGui's include directory, which the F1 overlay builds against.
-    target_link_libraries(mp_port_audio PRIVATE ${AURORA_SDL_TARGET} aurora::core)
+    target_link_libraries(mp_port_audio PRIVATE ${AURORA_SDL3_TARGET} aurora::core)
     # port_zip.cpp includes <zlib.h>: Aurora provides ZLIB::ZLIB (system or fetched zlib-ng),
     # and Windows has no system header to fall back on.
     if(TARGET ZLIB::ZLIB)
         target_link_libraries(mp_port_audio PRIVATE ZLIB::ZLIB)
     endif()
     # platform/main.cpp turns fd 1 and fd 2 into logcat lines and resolves its directories
-    # through SDL_GetPrefPath on Android, so the entry object needs SDL2's headers there.
-    # AURORA_SDL_TARGET only exists once Aurora has been added, which is why this is here
+    # through SDL_GetPrefPath on Android, so the entry object needs SDL3's headers there.
+    # AURORA_SDL3_TARGET only exists once Aurora has been added, which is why this is here
     # rather than with the target itself; the desktop path needs it for the disc message and
     # picker.
     target_include_directories(mp_port_entry PRIVATE
-        $<TARGET_PROPERTY:${AURORA_SDL_TARGET},INTERFACE_INCLUDE_DIRECTORIES>)
+        $<TARGET_PROPERTY:${AURORA_SDL3_TARGET},INTERFACE_INCLUDE_DIRECTORIES>)
 else()
     message(FATAL_ERROR
-        "platform/ai_dma.cpp needs SDL2, but Aurora provided no AURORA_SDL_TARGET. "
+        "platform/ai_dma.cpp needs SDL3, but Aurora provided no AURORA_SDL3_TARGET. "
         "The game links AIInitDMA/AIStartDMA/AIGetDMAStartAddr/AIRegisterDMACallback "
         "from it, so without SDL the port cannot link.")
 endif()
@@ -732,7 +732,7 @@ endif()
 # it is not behind BUILD_TESTING: some dependency of Aurora forces that variable to OFF
 # internally (build-port-link/CMakeCache.txt), so a condition on it would silently drop the
 # test.
-if(AURORA_SDL_TARGET)
+if(AURORA_SDL3_TARGET)
     enable_testing()
     # Every F1 row is in platform/port_settings_index.inc (the settings search) and every settings key
     # in docs/SETTINGS.md (tools/check_settings_index.py, MP1's checker).
@@ -792,7 +792,7 @@ if(AURORA_SDL_TARGET)
     add_test(NAME port_radial_touch_tests COMMAND port_radial_touch_tests)
     add_executable(port_radial_mouse_tests tests/port_mouse.cpp platform/port_mouse.cpp platform/port_radial.cpp)
     target_include_directories(port_radial_mouse_tests PRIVATE platform/include extern/aurora/include)
-    target_link_libraries(port_radial_mouse_tests PRIVATE ${AURORA_SDL_TARGET})
+    target_link_libraries(port_radial_mouse_tests PRIVATE ${AURORA_SDL3_TARGET})
     add_test(NAME port_radial_mouse_tests COMMAND port_radial_mouse_tests)
     set_tests_properties(port_radial_tests port_radial_retry_tests port_radial_touch_tests port_radial_mouse_tests
         PROPERTIES TIMEOUT 30 LABELS port)
@@ -865,9 +865,9 @@ if(AURORA_SDL_TARGET)
     set_tests_properties(port_config_reset_tests PROPERTIES TIMEOUT 30 LABELS port)
     add_executable(port_touch_pad_tests tests/touch_pad.cpp platform/touch_pad.cpp)
     target_include_directories(port_touch_pad_tests PRIVATE platform/include extern/aurora/include
-        $<TARGET_PROPERTY:${AURORA_SDL_TARGET},INTERFACE_INCLUDE_DIRECTORIES>)
+        $<TARGET_PROPERTY:${AURORA_SDL3_TARGET},INTERFACE_INCLUDE_DIRECTORIES>)
     target_compile_definitions(port_touch_pad_tests PRIVATE TARGET_PC)
-    target_link_libraries(port_touch_pad_tests PRIVATE ${AURORA_SDL_TARGET})
+    target_link_libraries(port_touch_pad_tests PRIVATE ${AURORA_SDL3_TARGET})
     add_test(NAME port_touch_pad_tests COMMAND port_touch_pad_tests)
     set_tests_properties(port_touch_pad_tests PROPERTIES TIMEOUT 30 LABELS port)
     # Header-only (port_hold_toggle.h): no Aurora link, no TARGET_PC.
@@ -951,7 +951,7 @@ if(AURORA_SDL_TARGET)
         platform/input/port_input_engine.cpp platform/input/port_input_bindings.cpp)
     target_include_directories(port_controller_regressions PRIVATE platform/include extern/aurora/include)
     target_compile_definitions(port_controller_regressions PRIVATE TARGET_PC)
-    target_link_libraries(port_controller_regressions PRIVATE ${AURORA_SDL_TARGET})
+    target_link_libraries(port_controller_regressions PRIVATE ${AURORA_SDL3_TARGET})
     add_test(NAME port_controller_regressions COMMAND port_controller_regressions)
     set_tests_properties(port_controller_regressions PROPERTIES TIMEOUT 30 LABELS port)
     # The gyro filter (platform/port_gyro_motion.cpp, MP1's): calibration, manual calibration,
@@ -1019,9 +1019,9 @@ elseif(IOS)
     add_executable(metroid_prime2_port MACOSX_BUNDLE platform/port_ios.mm)
     set_source_files_properties(platform/port_ios.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_include_directories(metroid_prime2_port PRIVATE platform/include
-        $<TARGET_PROPERTY:${AURORA_SDL_TARGET},INTERFACE_INCLUDE_DIRECTORIES>)
+        $<TARGET_PROPERTY:${AURORA_SDL3_TARGET},INTERFACE_INCLUDE_DIRECTORIES>)
     target_link_libraries(metroid_prime2_port PRIVATE
-        ${AURORA_SDL_TARGET} "-framework UIKit" "-framework UniformTypeIdentifiers")
+        ${AURORA_SDL3_TARGET} "-framework UIKit" "-framework UniformTypeIdentifiers")
     set_target_properties(metroid_prime2_port PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/packaging/ios/Info.plist.in"
         MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.odrannnn.metroidprime2port"

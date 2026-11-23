@@ -958,7 +958,7 @@ bool CardRawFile::insertGci(const void* data, const size_t size, const bool repl
   return commit() == ECardResult::READY;
 }
 
-bool CardRawFile::_writeMetadata(SDL_RWops* stream) {
+bool CardRawFile::_writeMetadata(SDL_IOStream* stream) {
   m_tmpCh = m_ch;
   m_tmpCh._swapEndian();
   if (!io::write_at(stream, 0, m_tmpCh.raw.data(), BlockSize)) {

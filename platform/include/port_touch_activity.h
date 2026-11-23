@@ -1,6 +1,6 @@
 #pragma once
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <atomic>
 #include <cstdlib>
 
@@ -20,20 +20,24 @@ public:
 // virtual pad and SDL's synthetic mouse events must not switch back to physical.
 inline bool PhysicalEvent(const SDL_Event& event, bool overlay, bool virtualPad) {
   switch (event.type) {
-  case SDL_CONTROLLERBUTTONDOWN: return !virtualPad;
-  case SDL_CONTROLLERAXISMOTION:
-    return !virtualPad && std::abs(int(event.caxis.value)) > 16000;
-  case SDL_MOUSEBUTTONDOWN:
-    return event.button.which != SDL_TOUCH_MOUSEID;
-  case SDL_KEYDOWN:
+  case SDL_EVENT_GAMEPAD_BUTTON_DOWN: return !virtualPad;
+  case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+    return !virtualPad && std::abs(int(event.gaxis.value)) > 16000;
+  case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    return event.button.which != SDL_TOUCH_MOUSEID && event.button.which != SDL_PEN_MOUSEID;
+  case SDL_EVENT_KEY_DOWN:
     if (event.key.repeat || overlay) return false;
-    switch (event.key.keysym.scancode) {
+    switch (event.key.scancode) {
     case SDL_SCANCODE_AC_BACK:
     case SDL_SCANCODE_VOLUMEUP:
     case SDL_SCANCODE_VOLUMEDOWN:
     case SDL_SCANCODE_MUTE:
-    case SDL_SCANCODE_AUDIOPLAY:
-    case SDL_SCANCODE_AUDIOSTOP:
+    case SDL_SCANCODE_MEDIA_PLAY:
+    case SDL_SCANCODE_MEDIA_PAUSE:
+    case SDL_SCANCODE_MEDIA_PLAY_PAUSE:
+    case SDL_SCANCODE_MEDIA_NEXT_TRACK:
+    case SDL_SCANCODE_MEDIA_PREVIOUS_TRACK:
+    case SDL_SCANCODE_MEDIA_STOP:
     case SDL_SCANCODE_POWER: return false;
     default: return true;
     }

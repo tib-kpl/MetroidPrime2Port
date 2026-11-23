@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <string_view>
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL_haptic.h>
+#include <SDL3/SDL_sensor.h>
+#include <SDL3/SDL_video.h>
 
 namespace aurora::device {
 namespace detail {
@@ -29,24 +31,31 @@ bool open_haptic() noexcept {
     return true;
   }
 
-  const int count = SDL_NumHaptics();
-  int selected = -1;
-  for (int i = 0; i < count; ++i) {
-    const char* name = SDL_HapticName(i);
-    if (name != nullptr && std::string_view{name} == kAndroidDeviceHapticName) {
-      selected = i;
-      break;
-    }
-  }
-  if (selected < 0) {
+  int count = 0;
+  SDL_HapticID* haptics = SDL_GetHaptics(&count);
+  if (haptics == nullptr) {
     return false;
   }
 
-  g_haptic = SDL_HapticOpen(selected);
+  SDL_HapticID selected = 0;
+  for (int i = 0; i < count; ++i) {
+    const char* name = SDL_GetHapticNameForID(haptics[i]);
+    if (name != nullptr && std::string_view{name} == kAndroidDeviceHapticName) {
+      selected = haptics[i];
+      break;
+    }
+  }
+  SDL_free(haptics);
+
+  if (selected == 0) {
+    return false;
+  }
+
+  g_haptic = SDL_OpenHaptic(selected);
   if (g_haptic == nullptr) {
     return false;
   }
-  if (!SDL_HapticRumbleSupported(g_haptic) || SDL_HapticRumbleInit(g_haptic) != 0) {
+  if (!SDL_HapticRumbleSupported(g_haptic) || !SDL_InitHapticRumble(g_haptic)) {
     SDL_CloseHaptic(g_haptic);
     g_haptic = nullptr;
     return false;
@@ -61,13 +70,26 @@ SDL_Sensor* open_sensor(const SDL_SensorType type, SDL_Sensor*& sensor) noexcept
     return sensor;
   }
 
-  const int count = SDL_NumSensors();
-  for (int index = 0; index < count; ++index) {
-    if (SDL_SensorGetDeviceType(index) == type) {
-      sensor = SDL_SensorOpen(index);
+  int count = 0;
+  SDL_SensorID* sensors = SDL_GetSensors(&count);
+  if (sensors == nullptr) {
+    return nullptr;
+  }
+
+  SDL_SensorID selected = 0;
+  for (int i = 0; i < count; ++i) {
+    if (SDL_GetSensorTypeForID(sensors[i]) == type) {
+      selected = sensors[i];
       break;
     }
   }
+  SDL_free(sensors);
+
+  if (selected == 0) {
+    return nullptr;
+  }
+
+  sensor = SDL_OpenSensor(selected);
   return sensor;
 }
 
@@ -91,10 +113,13 @@ void rotate_sensor_to_display(float* data, const int n_values) noexcept {
     return;
   }
 
-  SDL_Window* window = SDL_GetWindowFromID(1);
-  const int display = window != nullptr ? SDL_GetWindowDisplayIndex(window) : 0;
-  const int natural = 0;
-  const int current = orientation_quarter_turns(SDL_GetDisplayOrientation(display));
+  const SDL_DisplayID display = SDL_GetPrimaryDisplay();
+  if (display == 0) {
+    return;
+  }
+
+  const int natural = orientation_quarter_turns(SDL_GetNaturalDisplayOrientation(display));
+  const int current = orientation_quarter_turns(SDL_GetCurrentDisplayOrientation(display));
   if (natural < 0 || current < 0) {
     return;
   }
@@ -129,8 +154,8 @@ bool read_sensor_data(const SDL_SensorType type, SDL_Sensor*& cached_sensor, flo
     return false;
   }
 
-  SDL_SensorUpdate();
-  if (SDL_SensorGetData(sensor, data, n_values) != 0) {
+  SDL_UpdateSensors();
+  if (!SDL_GetSensorData(sensor, data, n_values)) {
     return false;
   }
   rotate_sensor_to_display(data, n_values);
@@ -139,7 +164,7 @@ bool read_sensor_data(const SDL_SensorType type, SDL_Sensor*& cached_sensor, flo
 
 void close_sensor(SDL_Sensor*& sensor) noexcept {
   if (sensor != nullptr) {
-    SDL_SensorClose(sensor);
+    SDL_CloseSensor(sensor);
     sensor = nullptr;
   }
 }
@@ -156,18 +181,18 @@ void rumble(const uint16_t low_freq_intensity, const uint16_t high_freq_intensit
 
   const float strength = rumble_strength(low_freq_intensity, high_freq_intensity);
   if (strength <= 0.0f) {
-    SDL_HapticRumbleStop(g_haptic);
+    SDL_StopHapticRumble(g_haptic);
     return;
   }
 
-  SDL_HapticRumblePlay(g_haptic, strength,
+  SDL_PlayHapticRumble(g_haptic, strength,
                        duration_ms == 0 ? kIndefiniteRumbleDurationMs : static_cast<uint32_t>(duration_ms));
 }
 
 namespace detail {
 void shutdown_rumble() noexcept {
   if (g_haptic != nullptr) {
-    SDL_HapticRumbleStop(g_haptic);
+    SDL_StopHapticRumble(g_haptic);
     SDL_CloseHaptic(g_haptic);
     g_haptic = nullptr;
   }

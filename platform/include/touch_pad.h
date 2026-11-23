@@ -16,13 +16,13 @@
 #ifndef PORT_TOUCH_PAD_H
 #define PORT_TOUCH_PAD_H
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 namespace PortTouchPad {
 
 // An attached virtual pad, and the id needed to detach it.
 struct Pad {
-  SDL_JoystickID id = -1;
+  SDL_JoystickID id = 0;
   SDL_Joystick* handle = nullptr;
 
   bool ok() const { return handle != nullptr; }

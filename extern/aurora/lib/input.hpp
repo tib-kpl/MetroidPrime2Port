@@ -2,17 +2,17 @@
 
 #include <string>
 #include "dolphin/pad.h" // For PADDeaZones and PADButtonMapping
-#include <SDL2/SDL_gamecontroller.h>
-#include <SDL2/SDL_keyboard.h>
-#include <SDL2/SDL_keycode.h>
-#include <SDL2/SDL_mouse.h>
+#include "SDL3/SDL_gamepad.h"
+#include "SDL3/SDL_keyboard.h"
+#include "SDL3/SDL_keycode.h"
+#include "SDL3/SDL_mouse.h"
 #include "logging.hpp"
 
 #include <absl/container/flat_hash_map.h>
 
 namespace aurora::input {
 struct GameController {
-  SDL_GameController* m_controller = nullptr;
+  SDL_Gamepad* m_controller = nullptr;
   bool m_isGameCube = false;
   Sint32 m_index = -1;
   bool m_hasRumble = false;

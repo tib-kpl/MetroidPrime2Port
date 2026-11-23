@@ -58,8 +58,8 @@ extern "C" __declspec(dllimport) unsigned int __stdcall SetErrorMode(unsigned in
 #include <string_view>
 // SDL owns the app's private directories on Android, where the port's own three are resolved
 // beneath them, and shows the disc message and picker everywhere. The include directory is
-// attached to this target in CMakeLists.txt, in the Aurora SDL2 provider.
-#include <SDL2/SDL.h>
+// attached to this target in CMakeLists.txt, in the AURORA_SDL3_TARGET block.
+#include <SDL3/SDL.h>
 #include <atomic>
 #if defined(SDL_PLATFORM_IOS)
 #include "port_ios.h"
@@ -909,7 +909,11 @@ SDL_Window* DiscDialogWindow() {
       port::EnvString("MP2_FRAMES") != nullptr) {
     return nullptr;
   }
-  return SDL_GetWindowFromID(1);
+  int windowCount = 0;
+  SDL_Window** windows = SDL_GetWindows(&windowCount);
+  SDL_Window* window = windows != nullptr && windowCount > 0 ? windows[0] : nullptr;
+  SDL_free(windows);
+  return window;
 }
 
 // A read of the image that fails mid-game (damage the mount check missed) ends the session, and
@@ -988,10 +992,60 @@ bool ShowDiscError(const std::string& problem, const std::string& path, bool off
 bool sDiscPickGaveUp = false;
 
 std::string PickDiscImage() {
+  static std::atomic<bool> answered{false};
+  static std::string chosen;
+  answered.store(false);
+  chosen.clear();
   sDiscPickGaveUp = false;
-  std::fprintf(stderr, "metroid_prime2_port: SDL2 has no native file picker; launch with a disc image path\n");
-  sDiscPickGaveUp = true;
-  return {};
+  SDL_Window* window = DiscDialogWindow();
+  if (window == nullptr) {
+    return {};
+  }
+  // Static: SDL reads the filters until the dialog closes, which can outlive this call.
+  static const SDL_DialogFileFilter filters[] = {
+      {"Metroid Prime 2: Echoes disc image (iso, gcm, rvz, wbfs, ciso, nkit)", "iso;gcm;rvz;wbfs;ciso;nkit"},
+      {"All files", "*"},
+  };
+  const SDL_PropertiesID props = SDL_CreateProperties();
+  SDL_SetPointerProperty(props, SDL_PROP_FILE_DIALOG_FILTERS_POINTER, const_cast<SDL_DialogFileFilter*>(filters));
+  SDL_SetNumberProperty(props, SDL_PROP_FILE_DIALOG_NFILTERS_NUMBER, 2);
+  SDL_SetPointerProperty(props, SDL_PROP_FILE_DIALOG_WINDOW_POINTER, window);
+  SDL_SetStringProperty(props, SDL_PROP_FILE_DIALOG_TITLE_STRING,
+                        "Select your Metroid Prime 2: Echoes disc image (GameCube USA or PAL, or Metroid Prime Trilogy)");
+  const SDL_DialogFileCallback onAnswer = [](void*, const char* const* files, int) {
+    if (files != nullptr && files[0] != nullptr) {
+      chosen = files[0];
+    }
+    answered.store(true);
+  };
+#if defined(SDL_PLATFORM_IOS)
+  // SDL has no file dialog on iOS.
+  PortIos::ShowDiscPicker(window, onAnswer, nullptr);
+#else
+  SDL_ShowFileDialogWithProperties(SDL_FILEDIALOG_OPENFILE, onAnswer, nullptr, props);
+#endif
+  SDL_DestroyProperties(props);
+  const Uint64 deadline = SDL_GetTicks() + 5 * 60 * 1000;
+  while (!answered.load()) {
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+      if (event.type == SDL_EVENT_QUIT) {
+        std::fprintf(stderr, "metroid_prime2_port: disc selection cancelled\n");
+        sDiscPickGaveUp = true;
+        return {};
+      }
+    }
+    if (SDL_GetTicks() > deadline) {
+      std::fprintf(stderr, "metroid_prime2_port: disc selection timed out\n");
+      sDiscPickGaveUp = true;
+      return {};
+    }
+    SDL_Delay(10);
+  }
+  if (chosen.empty()) {
+    std::fprintf(stderr, "metroid_prime2_port: no disc image picked\n");
+  }
+  return chosen;
 }
 
 // Asks until a disc is picked or the user closes the game: a dialog closed without a pick used to
@@ -1335,7 +1389,7 @@ int main(int argc, char** argv) {
   // narrowed to x11. A list without x11 (SDL_VIDEODRIVER=wayland) is still honoured.
 #if !defined(_WIN32) && !defined(__ANDROID__) && !defined(__APPLE__)
   {
-    const char* requested = SDL_GetHint(SDL_HINT_VIDEODRIVER);
+    const char* requested = SDL_GetHint(SDL_HINT_VIDEO_DRIVER);
     const char* x11 = std::getenv("DISPLAY");
     const auto present = [](const char* v) { return v != nullptr && v[0] != '\0'; };
     const bool unnamed = !present(requested);
@@ -1358,7 +1412,7 @@ int main(int argc, char** argv) {
     };
     if (!unnamed && underSteam && present(x11) && !isX11(requested) && listsX11(requested)) {
       // The environment variable outranks a normal-priority hint, hence OVERRIDE.
-      SDL_SetHintWithPriority(SDL_HINT_VIDEODRIVER, "x11", SDL_HINT_OVERRIDE);
+      SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "x11", SDL_HINT_OVERRIDE);
       std::fprintf(stderr,
                    "port: launched by Steam, so using SDL's x11 video driver instead of "
                    "SDL_VIDEODRIVER=%s; Steam Input only applies the game's controller layout to "
@@ -1370,7 +1424,7 @@ int main(int argc, char** argv) {
                    "focused and keeps its Desktop controller layout.\n",
                    requested);
     } else if (unnamed && present(x11)) {
-      SDL_SetHint(SDL_HINT_VIDEODRIVER, "x11");
+      SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "x11");
       std::fprintf(stderr,
                    "port: using SDL's x11 video driver on %s; its wayland backend hangs on window "
                    "creation under GNOME (libdecor). Set SDL_VIDEODRIVER to override.\n",

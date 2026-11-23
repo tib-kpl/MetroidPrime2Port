@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL_iostream.h>
 
 namespace aurora::io {
 
@@ -21,17 +21,17 @@ std::string fs_path_to_string(const std::filesystem::path& path);
 std::filesystem::path fs_path_from_string(std::string_view path);
 
 struct StreamDeleter {
-  void operator()(SDL_RWops* stream) const noexcept;
+  void operator()(SDL_IOStream* stream) const noexcept;
 };
 
-using Stream = std::unique_ptr<SDL_RWops, StreamDeleter>;
+using Stream = std::unique_ptr<SDL_IOStream, StreamDeleter>;
 
 Stream open_file(const std::filesystem::path& path, const char* mode);
 
-bool read_exact(SDL_RWops* stream, void* dst, size_t size) noexcept;
-bool write_exact(SDL_RWops* stream, const void* src, size_t size) noexcept;
-bool read_at(SDL_RWops* stream, uint64_t offset, void* dst, size_t size) noexcept;
-bool write_at(SDL_RWops* stream, uint64_t offset, const void* src, size_t size) noexcept;
+bool read_exact(SDL_IOStream* stream, void* dst, size_t size) noexcept;
+bool write_exact(SDL_IOStream* stream, const void* src, size_t size) noexcept;
+bool read_at(SDL_IOStream* stream, uint64_t offset, void* dst, size_t size) noexcept;
+bool write_at(SDL_IOStream* stream, uint64_t offset, const void* src, size_t size) noexcept;
 
 std::optional<std::vector<uint8_t>> read_file(const std::filesystem::path& path) noexcept;
 bool write_file(const std::filesystem::path& path, std::span<const uint8_t> data) noexcept;
@@ -55,7 +55,7 @@ public:
   AtomicFileWriter(const AtomicFileWriter&) = delete;
   AtomicFileWriter& operator=(const AtomicFileWriter&) = delete;
 
-  [[nodiscard]] SDL_RWops* get() const noexcept { return m_stream.get(); }
+  [[nodiscard]] SDL_IOStream* get() const noexcept { return m_stream.get(); }
   explicit operator bool() const noexcept { return m_stream != nullptr; }
 
   /** Flushes, closes, and atomically replaces the destination with the temporary file. */

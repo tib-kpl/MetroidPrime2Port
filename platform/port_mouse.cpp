@@ -12,9 +12,8 @@
 #include "port_radial.h"
 
 #include "port_overlay_internal.h"
-#include "port_time.h"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 #include <atomic>
 #include <cmath>
@@ -233,7 +232,18 @@ void ReadEnv() {
 SDL_Window* GameWindow() {
   static SDL_Window* sWindow = nullptr;
   if (sWindow == nullptr) {
-    sWindow = SDL_GetWindowFromID(1);
+    int count = 0;
+    if (SDL_Window** windows = SDL_GetWindows(&count)) {
+      for (int i = 0; i < count; ++i) {
+        if ((SDL_GetWindowFlags(windows[i]) & SDL_WINDOW_INPUT_FOCUS) != 0) {
+          sWindow = windows[i];
+          break;
+        }
+      }
+      if (sWindow == nullptr && count > 0) {
+        sWindow = windows[0];
+      }
+    }
   }
   return sWindow;
 }
@@ -255,11 +265,13 @@ void ApplyCapture(bool captured) {
   sCaptured = captured;
   // One line per change, so a run's log says whether the mouse ever took the view.
   std::fprintf(stderr, "[mouse] %s\n", captured ? "captured: aim owns the view" : "released");
-  if (GameWindow() != nullptr) SDL_SetRelativeMouseMode(captured ? SDL_TRUE : SDL_FALSE);
+  if (SDL_Window* window = GameWindow()) {
+    SDL_SetWindowRelativeMouseMode(window, captured);
+  }
   if (captured) {
-    SDL_ShowCursor(SDL_DISABLE);
+    SDL_HideCursor();
   } else {
-    SDL_ShowCursor(SDL_ENABLE);
+    SDL_ShowCursor();
     ClearPendingTravel(sSlots[0]);
   }
 }
@@ -277,8 +289,8 @@ void SetCapture(bool captured) {
 void PointerAimScale(float& sx, float& sy) {
   int width = 0, height = 0;
   SDL_Window* window = GameWindow();
-  if (window != nullptr) SDL_GetWindowSize(window, &width, &height);
-  if (window == nullptr || width <= 0 || height <= 0) {
+  if (window == nullptr || !SDL_GetWindowSize(window, &width, &height) || width <= 0 ||
+      height <= 0) {
     width = 640;
     height = 480;
   }
@@ -593,12 +605,12 @@ void SetTouchAimDown(bool down) {
 }
 
 void SpringSwipe() {
-  sTouchHoldUntilNs = PortTime::NowNs() + static_cast< uint64_t >(kTouchSpringHoldSeconds * 1e9);
+  sTouchHoldUntilNs = SDL_GetTicksNS() + static_cast< uint64_t >(kTouchSpringHoldSeconds * 1e9);
 }
 
 bool TouchAimActive() {
   return sTouchEnabled.load() &&
-         (sTouchAimDown.load() || PortTime::NowNs() < sTouchHoldUntilNs.load());
+         (sTouchAimDown.load() || SDL_GetTicksNS() < sTouchHoldUntilNs.load());
 }
 
 void SetTouchAimSpeed(float pixelsPerDp) {
@@ -652,7 +664,7 @@ void UpdateIdleCursor(bool mouseInput, bool keepVisible) {
   constexpr Uint64 kIdleNs = 2'000'000'000;
   static Uint64 sLastInputNs = 0;
   static bool sIdleHidden = false;
-  const Uint64 now = PortTime::NowNs();
+  const Uint64 now = SDL_GetTicksNS();
   if (mouseInput || keepVisible || sUiActive || sLastInputNs == 0) {
     sLastInputNs = now;
   }
@@ -665,9 +677,9 @@ void UpdateIdleCursor(bool mouseInput, bool keepVisible) {
   if (hide != sIdleHidden) {
     sIdleHidden = hide;
     if (hide) {
-      SDL_ShowCursor(SDL_DISABLE);
+      SDL_HideCursor();
     } else {
-      SDL_ShowCursor(SDL_ENABLE);
+      SDL_ShowCursor();
     }
   }
 }

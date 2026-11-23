@@ -7,9 +7,9 @@
 #include "port_overlay.h"
 #include "port_photo.h"
 
-#include <SDL2/SDL_events.h>
-#include <SDL2/SDL_mouse.h>
-#include <SDL2/SDL_touch.h>
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_touch.h>
 
 #include <algorithm>
 #include <cmath>
@@ -50,13 +50,14 @@ PhotoTouch sPhotoTouch;
 } // namespace
 
 void PhotoTouchEvent(const SDL_Event& event) {
-  if (event.type != SDL_FINGERDOWN && event.type != SDL_FINGERMOTION && event.type != SDL_FINGERUP) {
+  if (event.type != SDL_EVENT_FINGER_DOWN && event.type != SDL_EVENT_FINGER_MOTION &&
+      event.type != SDL_EVENT_FINGER_UP && event.type != SDL_EVENT_FINGER_CANCELED) {
     return;
   }
   const SDL_TouchFingerEvent& f = event.tfinger;
   std::lock_guard lock(sPhotoTouchMutex);
   PhotoTouch& t = sPhotoTouch;
-  if (event.type == SDL_FINGERDOWN) {
+  if (event.type == SDL_EVENT_FINGER_DOWN) {
     if (!t.enabled) {
       return;
     }
@@ -67,7 +68,7 @@ void PhotoTouchEvent(const SDL_Event& event) {
     }
     if (f.x < 0.5f && !t.stickDown) {
       t.stickDown = true;
-      t.stick = f.fingerId;
+      t.stick = f.fingerID;
       t.stickX = f.x;
       t.stickY = f.y;
       t.fingerX = f.x;
@@ -75,28 +76,28 @@ void PhotoTouchEvent(const SDL_Event& event) {
       t.moveX = t.moveY = 0.f;
     } else if (f.x >= 0.5f && !t.lookDown) {
       t.lookDown = true;
-      t.look = f.fingerId;
+      t.look = f.fingerID;
       t.lookX = f.x;
       t.lookY = f.y;
     }
-  } else if (event.type == SDL_FINGERMOTION) {
-    if (t.stickDown && f.fingerId == t.stick) {
+  } else if (event.type == SDL_EVENT_FINGER_MOTION) {
+    if (t.stickDown && f.fingerID == t.stick) {
       t.fingerX = f.x;
       t.fingerY = f.y;
       t.moveX = std::clamp((f.x - t.stickX) * t.aspect / kPhotoStickRadius, -1.f, 1.f);
       t.moveY = std::clamp((t.stickY - f.y) / kPhotoStickRadius, -1.f, 1.f);
-    } else if (t.lookDown && f.fingerId == t.look) {
+    } else if (t.lookDown && f.fingerID == t.look) {
       t.yaw -= (f.x - t.lookX) * t.aspect * kPhotoLookDegrees;
       t.pitch -= (f.y - t.lookY) * kPhotoLookDegrees;
       t.lookX = f.x;
       t.lookY = f.y;
     }
   } else {
-    if (t.stickDown && f.fingerId == t.stick) {
+    if (t.stickDown && f.fingerID == t.stick) {
       t.stickDown = false;
       t.moveX = t.moveY = 0.f;
     }
-    if (t.lookDown && f.fingerId == t.look) {
+    if (t.lookDown && f.fingerID == t.look) {
       t.lookDown = false;
     }
   }

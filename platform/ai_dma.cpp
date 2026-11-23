@@ -11,12 +11,8 @@
 #include <cstdlib>
 #include <cstdio>
 #include <limits>
-#include <algorithm>
-#include <cmath>
-#include <vector>
-#include "port_time.h"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 #include <dolphin/ai.h>
 
@@ -30,7 +26,7 @@ constexpr int kTargetQueuedBytes = kSampleRate * kBytesPerFrame * 64 / 1000;
 AIDCallback sCallback = nullptr;
 uintptr_t sBuffer = 0;
 uint32_t sLength = 0;
-SDL_AudioDeviceID sDevice = 0;
+SDL_AudioStream* sStream = nullptr;
 uint64_t sNextFrameNs = 0;
 bool sStarted = false;
 bool sOutputEnabled = true;
@@ -55,29 +51,27 @@ void RunCallback() {
 }
 
 void EnsureStream() {
-  if (sDevice != 0 || !sOutputEnabled) {
+  if (sStream != nullptr || !sOutputEnabled) {
     return;
   }
   if (!sAudioInitialized) {
-    sAudioInitialized = SDL_InitSubSystem(SDL_INIT_AUDIO) == 0;
+    sAudioInitialized = SDL_InitSubSystem(SDL_INIT_AUDIO);
     if (!sAudioInitialized) {
       std::fprintf(stderr, "AI audio initialization failed: %s\n", SDL_GetError());
       sOutputEnabled = false;
       return;
     }
   }
-  SDL_AudioSpec spec{};
-  spec.freq = kSampleRate;
-  spec.format = AUDIO_S16SYS;
-  spec.channels = 2;
-  spec.samples = 512;
-  sDevice = SDL_OpenAudioDevice(nullptr, 0, &spec, nullptr, 0);
-  if (sDevice == 0) {
+  SDL_AudioSpec spec{SDL_AUDIO_S16, 2, kSampleRate};
+  sStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+  if (sStream == nullptr) {
     std::fprintf(stderr, "AI audio device unavailable: %s\n", SDL_GetError());
     sOutputEnabled = false;
   } else {
+    // A boost set before the stream existed lands here.
+    SDL_SetAudioStreamGain(sStream, sSfxBoost);
     if (sPlaying) {
-      SDL_PauseAudioDevice(sDevice, 0);
+      SDL_ResumeAudioStreamDevice(sStream);
     }
   }
 }
@@ -110,31 +104,21 @@ extern "C" void AIPortPoll(void) {
   EnsureStarted();
   if (sCallback == nullptr || !sPlaying) {
     // Nothing is playing; resynchronise so a later stream does not burst.
-    sNextFrameNs = PortTime::NowNs();
+    sNextFrameNs = SDL_GetTicksNS();
     return;
   }
 
   // Keep enough decoded audio queued to absorb main-thread and disc-loading
   // jitter. A single 5 ms DMA buffer underruns whenever a frame runs long.
-  if (sOutputEnabled && sDevice != 0) {
-    Uint32 queued = SDL_GetQueuedAudioSize(sDevice);
+  if (sOutputEnabled && sStream != nullptr) {
+    int queued = SDL_GetAudioStreamQueued(sStream);
     int budget = 16;
-    while (sCallback != nullptr && queued < kTargetQueuedBytes && budget-- > 0) {
+    while (sCallback != nullptr && queued >= 0 && queued < kTargetQueuedBytes && budget-- > 0) {
       RunCallback();
       const uintptr_t buffer = sBuffer;
       const uint32_t length = sLength;
-      if (buffer == 0 || length == 0 || length % sizeof(int16_t) != 0) {
-        break;
-      }
-      const auto* samples = reinterpret_cast<const int16_t*>(buffer);
-      std::vector<int16_t> amplified(length / sizeof(int16_t));
-      for (size_t sample = 0; sample < amplified.size(); ++sample) {
-        amplified[sample] = static_cast<int16_t>(std::clamp(
-            std::lround(static_cast<double>(samples[sample]) * sSfxBoost),
-            static_cast<long>(std::numeric_limits<int16_t>::min()),
-            static_cast<long>(std::numeric_limits<int16_t>::max())));
-      }
-      if (SDL_QueueAudio(sDevice, amplified.data(), length) != 0) {
+      if (buffer == 0 || length == 0 ||
+          !SDL_PutAudioStreamData(sStream, reinterpret_cast< const void* >(buffer), length)) {
         break;
       }
       // MP_AI_DUMP=<path>: append what the AI path plays (32 kHz s16 stereo; movie audio), the
@@ -152,7 +136,7 @@ extern "C" void AIPortPoll(void) {
     return;
   }
 
-  const uint64_t now = PortTime::NowNs();
+  const uint64_t now = SDL_GetTicksNS();
   if (sNextFrameNs == 0) {
     sNextFrameNs = now;
   }
@@ -199,22 +183,22 @@ extern "C" AIDCallback AIRegisterDMACallback(AIDCallback callback) {
   // The previous owner may free its DMA buffer immediately after unregistering.
   sBuffer = reinterpret_cast<uintptr_t>(sSilence);
   sLength = sizeof(sSilence);
-  sNextFrameNs = PortTime::NowNs();
-  if (sDevice != 0) {
-    SDL_ClearQueuedAudio(sDevice);
+  sNextFrameNs = SDL_GetTicksNS();
+  if (sStream != nullptr) {
+    SDL_ClearAudioStream(sStream);
   }
   return previous;
 }
 
 extern "C" void AISetStreamPlayState(uint32_t state) {
   sPlaying = state != 0;
-  if (sDevice == 0) {
+  if (sStream == nullptr) {
     return;
   }
   if (state == 0) {
-    SDL_PauseAudioDevice(sDevice, 1);
+    SDL_PauseAudioStreamDevice(sStream);
   } else {
-    SDL_PauseAudioDevice(sDevice, 0);
+    SDL_ResumeAudioStreamDevice(sStream);
   }
 }
 
@@ -229,27 +213,29 @@ extern "C" void AIStartDMA(void) { AISetStreamPlayState(1); }
 extern "C" void AIPortSetOutputEnabled(int enabled) {
   EnsureStarted();
   sOutputEnabled = enabled != 0;
-  sNextFrameNs = PortTime::NowNs();
-  if (sDevice != 0) {
-    SDL_ClearQueuedAudio(sDevice);
+  sNextFrameNs = SDL_GetTicksNS();
+  if (sStream != nullptr) {
+    SDL_ClearAudioStream(sStream);
   }
   EnsureStream();
 }
 
-extern "C" int AIPortOutputEnabled(void) { return sOutputEnabled && sDevice != 0; }
+extern "C" int AIPortOutputEnabled(void) { return sOutputEnabled && sStream != nullptr; }
 
 // The port's volume boost for what this stream plays; 1.0 is none. Applied at once when the
 // stream is open, kept for one that opens later.
 extern "C" void AIPortSetOutputGain(float gain) {
   sSfxBoost = gain > 0.f ? gain : 1.f;
-  // Applied to queued DMA chunks in AIPortPoll.
+  if (sStream != nullptr) {
+    SDL_SetAudioStreamGain(sStream, sSfxBoost);
+  }
 }
 
 extern "C" void AIPortShutdown(void) {
   sCallback = nullptr;
-  if (sDevice != 0) {
-    SDL_CloseAudioDevice(sDevice);
-    sDevice = 0;
+  if (sStream != nullptr) {
+    SDL_DestroyAudioStream(sStream);
+    sStream = nullptr;
   }
   if (sAudioInitialized) {
     SDL_QuitSubSystem(SDL_INIT_AUDIO);

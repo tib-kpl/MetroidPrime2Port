@@ -12,7 +12,7 @@ namespace {
 
 bool Near(float a, float b) { return std::fabs(a - b) < 1e-4f; }
 
-// SDL_GameControllerButton / SDL_GameControllerAxis numbering.
+// SDL_GamepadButton / SDL_GamepadAxis numbering.
 constexpr uint16_t kA = 0, kB = 1, kX = 2, kY = 3, kLB = 9, kRB = 10, kDUp = 11;
 constexpr uint16_t kLeftX = 0, kRightX = 2;
 

@@ -4,7 +4,7 @@
 #include "port_mouse.h"
 #include "port_radial.h"
 #include "port_test.h"
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 #include <cmath>
 #include <cstdio>
@@ -14,13 +14,13 @@
 namespace PortOverlaySettings { void LoadSettings() {} }
 
 extern "C" {
-SDL_Window* SDL_GetWindowFromID(Uint32) { return nullptr; }
-void SDL_GetWindowSize(SDL_Window*, int* width, int* height) {
-  if (width != nullptr) *width = 0;
-  if (height != nullptr) *height = 0;
-}
-int SDL_SetRelativeMouseMode(SDL_bool) { return 0; }
-int SDL_ShowCursor(int) { return 0; }
+SDL_Window** SDL_GetWindows(int* count) { *count = 0; return nullptr; }
+SDL_WindowFlags SDL_GetWindowFlags(SDL_Window*) { return 0; }
+bool SDL_GetWindowSize(SDL_Window*, int*, int*) { return false; }
+bool SDL_SetWindowRelativeMouseMode(SDL_Window*, bool) { return true; }
+bool SDL_HideCursor() { return true; }
+bool SDL_ShowCursor() { return true; }
+Uint64 SDL_GetTicksNS() { return 0; }
 }
 
 namespace {

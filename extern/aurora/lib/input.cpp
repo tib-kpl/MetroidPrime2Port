@@ -6,7 +6,8 @@
 
 #include "magic_enum.hpp"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL_haptic.h>
+#include <SDL3/SDL.h>
 #include <absl/container/flat_hash_map.h>
 #include <algorithm>
 #include <array>
@@ -83,24 +84,23 @@ bool serial_matches(const std::string& saved, const std::string& current) {
 ControllerIdentity controller_identity(const GameController& controller) {
   ControllerIdentity identity;
   char guid[33] = {};
-  SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(SDL_GameControllerGetJoystick(controller.m_controller)), guid,
-                            sizeof(guid));
+  SDL_GUIDToString(SDL_GetGamepadGUIDForID(SDL_GetGamepadID(controller.m_controller)), guid, sizeof(guid));
   identity.guid = guid;
-  identity.serial = normalize_serial(SDL_GameControllerGetSerial(controller.m_controller));
+  identity.serial = normalize_serial(SDL_GetGamepadSerial(controller.m_controller));
   return identity;
 }
 
 template <typename T>
-bool read_value(SDL_RWops* file, T& value) {
+bool read_value(SDL_IOStream* file, T& value) {
   return io::read_exact(file, &value, sizeof(value));
 }
 
 template <typename T>
-bool write_value(SDL_RWops* file, const T& value) {
+bool write_value(SDL_IOStream* file, const T& value) {
   return io::write_exact(file, &value, sizeof(value));
 }
 
-bool read_string(SDL_RWops* file, std::string& value) {
+bool read_string(SDL_IOStream* file, std::string& value) {
   uint32_t size = 0;
   if (!read_value(file, size) || size > kMaxPersistedStringLength) {
     return false;
@@ -110,16 +110,16 @@ bool read_string(SDL_RWops* file, std::string& value) {
   return size == 0 || io::read_exact(file, value.data(), size);
 }
 
-bool write_string(SDL_RWops* file, const std::string& value) {
+bool write_string(SDL_IOStream* file, const std::string& value) {
   const uint32_t size = static_cast<uint32_t>(std::min<size_t>(value.size(), kMaxPersistedStringLength));
   return write_value(file, size) && (size == 0 || io::write_exact(file, value.data(), size));
 }
 
-bool read_identity(SDL_RWops* file, ControllerIdentity& identity) {
+bool read_identity(SDL_IOStream* file, ControllerIdentity& identity) {
   return read_string(file, identity.guid) && read_string(file, identity.serial);
 }
 
-bool write_identity(SDL_RWops* file, const ControllerIdentity& identity) {
+bool write_identity(SDL_IOStream* file, const ControllerIdentity& identity) {
   return write_string(file, identity.guid) && write_string(file, identity.serial);
 }
 
@@ -226,10 +226,8 @@ IdentityMatch identity_match(const ControllerIdentity& saved, const ControllerId
   uint16_t savedProduct = 0;
   uint16_t currentVendor = 0;
   uint16_t currentProduct = 0;
-  SDL_GetJoystickGUIDInfo(SDL_JoystickGetGUIDFromString(saved.guid.c_str()), &savedVendor, &savedProduct, nullptr,
-                          nullptr);
-  SDL_GetJoystickGUIDInfo(SDL_JoystickGetGUIDFromString(current.guid.c_str()), &currentVendor, &currentProduct,
-                          nullptr, nullptr);
+  SDL_GetJoystickGUIDInfo(SDL_StringToGUID(saved.guid.c_str()), &savedVendor, &savedProduct, nullptr, nullptr);
+  SDL_GetJoystickGUIDInfo(SDL_StringToGUID(current.guid.c_str()), &currentVendor, &currentProduct, nullptr, nullptr);
   return savedVendor != 0 && savedVendor == currentVendor && savedProduct != 0 && savedProduct == currentProduct
              ? IdentityMatch::Fallback
              : IdentityMatch::None;
@@ -249,10 +247,10 @@ void apply_port_preferences() noexcept {
   }
 
   for (auto& [instance, controller] : g_GameControllers) {
-    const int32_t player = SDL_GameControllerGetPlayerIndex(controller.m_controller);
+    const int32_t player = SDL_GetGamepadPlayerIndex(controller.m_controller);
     if (player >= 0 && player < PAD_MAX_CONTROLLERS && g_portPreferences[player].state != PortPreferenceState::Unset) {
       // Keep SDL's default player assignment from taking explicitly configured ports
-      SDL_GameControllerSetPlayerIndex(controller.m_controller, -1);
+      SDL_SetGamepadPlayerIndex(controller.m_controller, -1);
     }
   }
 
@@ -273,7 +271,7 @@ void apply_port_preferences() noexcept {
 
       switch (identity_match(preference.identity, controller_identity(controller))) {
       case IdentityMatch::Exact:
-        SDL_GameControllerSetPlayerIndex(controller.m_controller, static_cast<int>(port));
+        SDL_SetGamepadPlayerIndex(controller.m_controller, static_cast<int32_t>(port));
         claimedControllers[claimedCount++] = instance;
         fallbackController = nullptr;
         break;
@@ -291,7 +289,7 @@ void apply_port_preferences() noexcept {
     }
 
     if (fallbackController != nullptr) {
-      SDL_GameControllerSetPlayerIndex(fallbackController->m_controller, static_cast<int>(port));
+      SDL_SetGamepadPlayerIndex(fallbackController->m_controller, static_cast<int32_t>(port));
       claimedControllers[claimedCount++] = fallbackInstance;
     }
   }
@@ -302,13 +300,7 @@ void apply_port_preferences() noexcept {
 // ranks with the virtual pads: a controller connected to a Deck takes player 1 from it, whatever
 // Steam's order, and the Deck gets it back when that controller leaves.
 bool is_fallback_controller(Uint32 instance, const GameController& controller) noexcept {
-  for (int deviceIndex = 0; deviceIndex < SDL_NumJoysticks(); ++deviceIndex) {
-    if (SDL_JoystickGetDeviceInstanceID(deviceIndex) == static_cast<SDL_JoystickID>(instance) &&
-        SDL_JoystickIsVirtual(deviceIndex) == SDL_TRUE) {
-      return true;
-    }
-  }
-  return controller.m_vid == 0x28de && controller.m_pid == 0x1205;
+  return SDL_IsJoystickVirtual(instance) || (controller.m_vid == 0x28de && controller.m_pid == 0x1205);
 }
 
 void prefer_real_controller_on_first_port() noexcept {
@@ -321,7 +313,7 @@ void prefer_real_controller_on_first_port() noexcept {
   for (auto& [instance, controller] : g_GameControllers) {
     FirstPortCandidate pad;
     pad.id = instance;
-    pad.port = SDL_GameControllerGetPlayerIndex(controller.m_controller);
+    pad.port = SDL_GetGamepadPlayerIndex(controller.m_controller);
     pad.fallback = is_fallback_controller(instance, controller);
     // apply_port_preferences left only the saved pad on a configured port
     pad.assigned = pad.port > 0 && pad.port < PAD_MAX_CONTROLLERS &&
@@ -337,11 +329,11 @@ void prefer_real_controller_on_first_port() noexcept {
   }
   GameController* wanted = controllers[move.take];
   if (move.give >= 0) {
-    SDL_GameControllerSetPlayerIndex(controllers[move.give]->m_controller, pads[move.take].port);
+    SDL_SetGamepadPlayerIndex(controllers[move.give]->m_controller, pads[move.take].port);
   }
-  SDL_GameControllerSetPlayerIndex(wanted->m_controller, 0);
-  Log.info("Controller '{}' moved to port 0", SDL_GameControllerName(wanted->m_controller) != nullptr
-                                                  ? SDL_GameControllerName(wanted->m_controller)
+  SDL_SetGamepadPlayerIndex(wanted->m_controller, 0);
+  Log.info("Controller '{}' moved to port 0", SDL_GetGamepadName(wanted->m_controller) != nullptr
+                                                  ? SDL_GetGamepadName(wanted->m_controller)
                                                   : "unknown");
 }
 } // namespace
@@ -384,7 +376,7 @@ Sint32 get_instance_for_player(uint32_t player) noexcept {
   return {};
 }
 
-#if defined(__ANDROID__)
+#ifdef SDL_PLATFORM_ANDROID
 // SDL's mapping for an Android pad it doesn't know covers buttons 0-14 and
 // analog trigger axes only. Digital L2/R2 keys arrive as raw buttons 15 and 16
 // and reach nothing, so handhelds such as the RG Rotate (#81) can't bind them.
@@ -394,23 +386,31 @@ Sint32 get_instance_for_player(uint32_t player) noexcept {
 // declares LTRIGGER/RTRIGGER/BRAKE/GAS axes that never move: L2/R2 only ever
 // arrive as keys. SDL maps the triggers to those dead axes, so on that pad
 // the buttons replace the axis bindings.
-static bool has_dead_trigger_axes(SDL_GameController* ctrl) noexcept {
-  return SDL_GameControllerGetVendor(ctrl) == 0x484b && SDL_GameControllerGetProduct(ctrl) == 0x1101;
+static bool has_dead_trigger_axes(SDL_Gamepad* ctrl) noexcept {
+  return SDL_GetGamepadVendor(ctrl) == 0x484b && SDL_GetGamepadProduct(ctrl) == 0x1101;
 }
 
-static void map_digital_triggers(SDL_GameController* ctrl) noexcept {
-  SDL_Joystick* joystick = SDL_GameControllerGetJoystick(ctrl);
-  const int buttons = SDL_JoystickNumButtons(joystick);
+static void map_digital_triggers(SDL_Gamepad* ctrl) noexcept {
+  const int buttons = SDL_GetNumJoystickButtons(SDL_GetGamepadJoystick(ctrl));
   if (buttons <= 15) {
     return;
   }
   const bool deadAxes = has_dead_trigger_axes(ctrl);
-  char* mapping = SDL_GameControllerMapping(ctrl);
-  if (mapping == nullptr) {
+  int count = 0;
+  SDL_GamepadBinding** bindings = SDL_GetGamepadBindings(ctrl, &count);
+  if (bindings == nullptr) {
     return;
   }
-  const bool hasTrigger = SDL_strstr(mapping, "lefttrigger:") != nullptr ||
-                          SDL_strstr(mapping, "righttrigger:") != nullptr;
+  bool hasTrigger = false;
+  for (int i = 0; i < count; ++i) {
+    if (bindings[i]->output_type == SDL_GAMEPAD_BINDTYPE_AXIS &&
+        (bindings[i]->output.axis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER ||
+         bindings[i]->output.axis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)) {
+      hasTrigger = true;
+    }
+  }
+  SDL_free(bindings);
+  char* mapping = SDL_GetGamepadMapping(ctrl);
   if ((hasTrigger && !deadAxes) || mapping == nullptr) {
     SDL_free(mapping);
     return;
@@ -434,43 +434,43 @@ static void map_digital_triggers(SDL_GameController* ctrl) noexcept {
   if (buttons > 16) {
     updated += "righttrigger:b16,";
   }
-  if (SDL_GameControllerAddMapping(updated.c_str()) < 0) {
+  if (SDL_AddGamepadMapping(updated.c_str()) < 0) {
     Log.warn("Failed to map digital triggers: {}", SDL_GetError());
   }
 }
 #endif
 
 SDL_JoystickID add_controller(SDL_JoystickID which) noexcept {
-  auto* ctrl = SDL_GameControllerOpen(which);
+  auto* ctrl = SDL_OpenGamepad(which);
   if (ctrl != nullptr) {
-#if defined(__ANDROID__)
+#ifdef SDL_PLATFORM_ANDROID
     map_digital_triggers(ctrl);
 #endif
     GameController controller;
     controller.m_controller = ctrl;
     controller.m_index = which;
-    controller.m_vid = SDL_GameControllerGetVendor(ctrl);
-    controller.m_pid = SDL_GameControllerGetProduct(ctrl);
+    controller.m_vid = SDL_GetGamepadVendor(ctrl);
+    controller.m_pid = SDL_GetGamepadProduct(ctrl);
     if (controller.m_vid == 0x05ac /* USB_VENDOR_APPLE */ && controller.m_pid == 3) {
       // Ignore Apple TV remote
-      SDL_GameControllerClose(ctrl);
+      SDL_CloseGamepad(ctrl);
       return -1;
     }
     controller.m_isGameCube = controller.m_vid == 0x057E && controller.m_pid == 0x0337;
     if (controller.m_isGameCube ||
-        (SDL_GameControllerGetType(ctrl) == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO && controller.m_pid == 0x2073)) {
+        (SDL_GetGamepadType(ctrl) == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO && controller.m_pid == 0x2073)) {
       controller.m_deadZones.emulateTriggers = false;
     }
-    controller.m_hasRumble = SDL_GameControllerHasRumble(ctrl) == SDL_TRUE;
-    controller.m_hasRgbLed = SDL_GameControllerHasLED(ctrl) == SDL_TRUE;
-    SDL_JoystickID instance = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(ctrl));
+    const auto props = SDL_GetGamepadProperties(ctrl);
+    controller.m_hasRumble = SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, true);
+    controller.m_hasRgbLed = SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RGB_LED_BOOLEAN, false);
+    SDL_JoystickID instance = SDL_GetJoystickID(SDL_GetGamepadJoystick(ctrl));
     g_GameControllers[instance] = controller;
     apply_port_preferences();
     prefer_real_controller_on_first_port();
     Log.info("Added controller '{}' (instance {}, vid {:04x}, pid {:04x}, type {}, port {})",
-             SDL_GameControllerName(ctrl) != nullptr ? SDL_GameControllerName(ctrl) : "unknown", instance,
-             controller.m_vid, controller.m_pid, static_cast<int>(SDL_GameControllerGetType(ctrl)),
-             SDL_GameControllerGetPlayerIndex(ctrl));
+             SDL_GetGamepadName(ctrl) != nullptr ? SDL_GetGamepadName(ctrl) : "unknown", instance, controller.m_vid,
+             controller.m_pid, static_cast<int>(SDL_GetGamepadType(ctrl)), SDL_GetGamepadPlayerIndex(ctrl));
     return instance;
   }
 
@@ -480,10 +480,10 @@ SDL_JoystickID add_controller(SDL_JoystickID which) noexcept {
 void remove_controller(Uint32 instance) noexcept {
   if (auto it = g_GameControllers.find(instance); it != g_GameControllers.end()) {
     Log.info("Removed controller '{}' (instance {})",
-             SDL_GameControllerName(it->second.m_controller) != nullptr ? SDL_GameControllerName(it->second.m_controller)
-                                                                         : "unknown",
+             SDL_GetGamepadName(it->second.m_controller) != nullptr ? SDL_GetGamepadName(it->second.m_controller)
+                                                                    : "unknown",
              instance);
-    SDL_GameControllerClose(it->second.m_controller);
+    SDL_CloseGamepad(it->second.m_controller);
     g_GameControllers.erase(it);
     apply_port_preferences();
     prefer_real_controller_on_first_port();
@@ -499,14 +499,14 @@ bool is_gamecube(Uint32 instance) noexcept {
 
 int32_t player_index(Uint32 instance) noexcept {
   if (auto it = g_GameControllers.find(instance); it != g_GameControllers.end()) {
-    return SDL_GameControllerGetPlayerIndex(it->second.m_controller);
+    return SDL_GetGamepadPlayerIndex(it->second.m_controller);
   }
   return -1;
 }
 
 void set_player_index(Uint32 instance, Sint32 index) noexcept {
   if (auto it = g_GameControllers.find(instance); it != g_GameControllers.end()) {
-    SDL_GameControllerSetPlayerIndex(it->second.m_controller, index);
+    SDL_SetGamepadPlayerIndex(it->second.m_controller, index);
   }
 }
 
@@ -517,7 +517,7 @@ bool take_first_port(Uint32 instance) noexcept {
   if (it == g_GameControllers.end()) {
     return false;
   }
-  const int32_t oldPort = SDL_GameControllerGetPlayerIndex(it->second.m_controller);
+  const int32_t oldPort = SDL_GetGamepadPlayerIndex(it->second.m_controller);
   if (oldPort == 0) {
     return false;
   }
@@ -531,11 +531,11 @@ bool take_first_port(Uint32 instance) noexcept {
       occupied[port] = get_controller_for_player(port) != nullptr;
     }
     // Clear the taker first: SDL drops whoever holds an index that is handed out again.
-    SDL_GameControllerSetPlayerIndex(it->second.m_controller, -1);
-    SDL_GameControllerSetPlayerIndex(holder->m_controller, displaced_port(oldPort, occupied));
+    SDL_SetGamepadPlayerIndex(it->second.m_controller, -1);
+    SDL_SetGamepadPlayerIndex(holder->m_controller, displaced_port(oldPort, occupied));
   }
-  SDL_GameControllerSetPlayerIndex(it->second.m_controller, 0);
-  const char* name = SDL_GameControllerName(it->second.m_controller);
+  SDL_SetGamepadPlayerIndex(it->second.m_controller, 0);
+  const char* name = SDL_GetGamepadName(it->second.m_controller);
   Log.info("Controller '{}' took port 0", name != nullptr ? name : "?");
   return true;
 }
@@ -548,7 +548,7 @@ void restore_saved_ports() noexcept {
 
 std::string controller_name(Uint32 instance) noexcept {
   if (auto it = g_GameControllers.find(instance); it != g_GameControllers.end()) {
-    const auto* name = SDL_GameControllerName(it->second.m_controller);
+    const auto* name = SDL_GetGamepadName(it->second.m_controller);
     if (name != nullptr) {
       return {name};
     }
@@ -566,7 +566,7 @@ bool controller_has_rumble(Uint32 instance) noexcept {
 void controller_rumble(uint32_t instance, uint16_t low_freq_intensity, uint16_t high_freq_intensity,
                        uint16_t duration_ms) noexcept {
   if (auto it = g_GameControllers.find(instance); it != g_GameControllers.end()) {
-    SDL_GameControllerRumble(it->second.m_controller, low_freq_intensity, high_freq_intensity, duration_ms);
+    SDL_RumbleGamepad(it->second.m_controller, low_freq_intensity, high_freq_intensity, duration_ms);
   }
 }
 
@@ -609,16 +609,17 @@ void persist_controller_for_player(uint32_t player, const GameController* contro
 void initialize() noexcept {
   /* Make sure we initialize everything input related now, this will automatically add all of the connected controllers
    * as expected */
-  Uint32 flags = SDL_INIT_HAPTIC | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER | SDL_INIT_SENSOR;
+  SDL_InitFlags flags = SDL_INIT_HAPTIC | SDL_INIT_JOYSTICK | SDL_INIT_GAMEPAD | SDL_INIT_SENSOR;
   if (headless()) {
     // Port: AURORA_HEADLESS: a test run reads no host controller (the virtual pads still work).
     // SDL opens every /dev/input/event* device to probe it, and each close costs ~16 ms, which
     // was ~0.6 s of every start-up: classic enumeration only probes /dev/input/js*, HIDAPI is
     // off and the haptic subsystem (another probe of every event device) is not started.
+    SDL_SetHint(SDL_HINT_JOYSTICK_LINUX_CLASSIC, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "0");
     flags &= ~SDL_INIT_HAPTIC;
   }
-  AURORA_ASSERT(SDL_Init(flags) == 0, "Failed to initialize SDL subsystems: {}", SDL_GetError());
+  AURORA_ASSERT(SDL_Init(flags), "Failed to initialize SDL subsystems: {}", SDL_GetError());
 }
 
 struct MouseScrollStatus {

@@ -12,7 +12,7 @@
 #include "port_savestate.h"
 #include "port_utf8_path.h"
 
-#include <SDL2/SDL_mouse.h>
+#include <SDL3/SDL_mouse.h>
 
 #include <algorithm>
 

@@ -16,11 +16,10 @@
 
 #include "port_steam_triton.h"
 
-#include <SDL2/SDL.h>
-
-#if SDL_MAJOR_VERSION >= 3
 #include "port_overlay.h"
+
 #include <dolphin/pad.h>
+
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_hidapi.h>
 #include <SDL3/SDL_timer.h>
@@ -30,9 +29,6 @@
 #include <cstring>
 #include <vector>
 
-#endif
-
-#if SDL_MAJOR_VERSION >= 3
 namespace PortSteamTriton {
 
 static_assert(kRightPaddle1 == SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1 &&
@@ -498,16 +494,3 @@ uint32_t Paddles() { return PortOverlay::SteamInputBackButtons() ? sStats.paddle
 Stats GetStats() { return sStats; }
 
 } // namespace PortSteamTriton
-#else
-namespace PortSteamTriton {
-
-void Update() {}
-
-bool Motion(float[3], float[3]) { return false; }
-
-uint32_t Paddles() { return 0; }
-
-Stats GetStats() { return {}; }
-
-} // namespace PortSteamTriton
-#endif

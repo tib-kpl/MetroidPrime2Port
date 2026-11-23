@@ -2,9 +2,8 @@
 
 #define IMGUI_DISABLE_DEFAULT_FILE_FUNCTIONS 1
 
-#include <SDL2/SDL.h>
-
-typedef SDL_RWops* ImFileHandle;
+typedef struct SDL_IOStream SDL_IOStream;
+typedef SDL_IOStream* ImFileHandle;
 typedef unsigned long long ImU64;
 
 ImFileHandle ImFileOpen(const char* filename, const char* mode);

@@ -20,11 +20,11 @@
 #include "port_save.h"
 #include "MetroidPrime/Player/CGameOptions.hpp"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #if defined(__ANDROID__)
 #include <jni.h>
 #endif
-#include <SDL2/SDL_timer.h>
+#include <SDL3/SDL_timer.h>
 #include <imgui.h>
 
 #include <algorithm>
@@ -56,7 +56,11 @@ std::vector< PortSave::ExportFile > sExportQueue;
 #endif
 
 SDL_Window* FirstWindow() {
-  return SDL_GetWindowFromID(1);
+  int count = 0;
+  SDL_Window** windows = SDL_GetWindows(&count);
+  SDL_Window* window = windows != nullptr && count > 0 ? windows[0] : nullptr;
+  SDL_free(windows);
+  return window;
 }
 
 #if defined(__ANDROID__)
@@ -112,11 +116,29 @@ void OnPick(void* userdata, const char* const* files, int) {
 }
 
 void OpenDialog(Pick pick) {
+  static const SDL_DialogFileFilter filters[] = {{"Save files (.gci, Trilogy save.bin)", "gci;bin"},
+                                                 {"All files", "*"}};
   sDialogOpen = true;
-  std::lock_guard lock(sPickMutex);
-  sPickError = "Native file picking is unavailable in the SDL2 build.";
-  sPicks.emplace_back(pick, std::string());
-  sDialogOpen = false;
+  void* userdata = reinterpret_cast< void* >(static_cast< intptr_t >(pick));
+  if (pick == kPick_Import) {
+    SDL_ShowOpenFileDialog(OnPick, userdata, FirstWindow(), filters, 2, nullptr, false);
+  } else if (pick == kPick_Trilogy) {
+    static const SDL_DialogFileFilter bin[] = {{"Trilogy save (save.bin)", "bin"}, {"All files", "*"}};
+    SDL_ShowOpenFileDialog(OnPick, userdata, FirstWindow(), bin, 2, nullptr, false);
+  } else if (pick == kPick_ExportFile) {
+#if defined(__ANDROID__)
+    static std::string name;
+    name = sExportQueue.empty() ? std::string() : sExportQueue.front().name;
+    SetNextAndroidSaveDialogFilename(name.c_str());
+    SDL_ShowSaveFileDialog(OnPick, userdata, FirstWindow(), nullptr, 0, name.empty() ? nullptr : name.c_str());
+#else
+    sDialogOpen = false;
+#endif
+  } else {
+    // A folder: the card's files keep their names, so they import back as they are; the emulator
+    // pick is its user folder.
+    SDL_ShowOpenFolderDialog(OnPick, userdata, FirstWindow(), nullptr, false);
+  }
 }
 
 // Dolphin's region folder for the mounted disc's card, as Aurora picks its own.

@@ -6,7 +6,6 @@
 // Built by `mp_port_audio` (it needs ImGui, which Aurora brings in with SDL).
 
 #include "port_mobile.h"
-#include "port_time.h"
 #include "port_overlay.h"
 #include "port_discord.h"
 
@@ -35,7 +34,7 @@
 #include "MetroidPrime/Player/CGameState.hpp"
 #include "MetroidPrime/Player/CPlayerState.hpp"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <aurora/aurora.h>
 #include <aurora/gfx.h>
 #include <dolphin/vi.h>
@@ -462,7 +461,7 @@ void ApplyRenderScale() {
 }
 
 void TickFps() {
-  const uint64_t now = PortTime::NowNs();
+  const uint64_t now = SDL_GetTicksNS();
   if (sFpsWindowStart == 0) {
     sFpsWindowStart = now;
   }
@@ -754,11 +753,11 @@ uint64_t sSkipConfirmUntilNs = 0;
 std::atomic<bool> sSkipConfirmTapped{false};
 } // namespace
 
-bool SkipConfirmArmed() { return sSkipConfirmUntilNs != 0 && PortTime::NowNs() < sSkipConfirmUntilNs; }
+bool SkipConfirmArmed() { return sSkipConfirmUntilNs != 0 && SDL_GetTicksNS() < sSkipConfirmUntilNs; }
 
 void SkipConfirmArm() {
   sSkipConfirmTapped.store(false);
-  sSkipConfirmUntilNs = PortTime::NowNs() + static_cast< uint64_t >(kSkipConfirmSeconds * 1e9f);
+  sSkipConfirmUntilNs = SDL_GetTicksNS() + static_cast< uint64_t >(kSkipConfirmSeconds * 1e9f);
 }
 
 void SkipConfirmDisarm() {
@@ -767,7 +766,7 @@ void SkipConfirmDisarm() {
 }
 
 float SkipConfirmAlpha() {
-  const uint64_t now = PortTime::NowNs();
+  const uint64_t now = SDL_GetTicksNS();
   if (sSkipConfirmUntilNs == 0 || now >= sSkipConfirmUntilNs) {
     return 0.f;
   }
@@ -1106,7 +1105,7 @@ bool RevealMap() {
 void RequestQuit() {
   PortOverlaySettings::SaveSettings();
   SDL_Event quit{};
-  quit.type = SDL_QUIT;
+  quit.type = SDL_EVENT_QUIT;
   SDL_PushEvent(&quit);
 }
 
@@ -1503,8 +1502,8 @@ void ApplyAspect() {
     int windowWidth = 0;
     int windowHeight = 0;
     SDL_Window* window = PortDebug::MainWindow();
-    if (window != nullptr) SDL_GetWindowSize(window, &windowWidth, &windowHeight);
-    if (windowWidth <= 0 || windowHeight <= 0) {
+    if (window == nullptr || !SDL_GetWindowSize(window, &windowWidth, &windowHeight) ||
+        windowWidth <= 0 || windowHeight <= 0) {
       windowWidth = 854;
       windowHeight = 480;
     }

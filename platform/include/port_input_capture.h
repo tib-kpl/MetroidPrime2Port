@@ -2,7 +2,7 @@
 
 #include "port_input_bindings.h"
 #include <dolphin/pad.h>
-#include <SDL2/SDL_scancode.h>
+#include <SDL3/SDL_scancode.h>
 #include <algorithm>
 #include <cmath>
 

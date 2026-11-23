@@ -3,7 +3,7 @@
 #include "aurora/aurora.h"
 #include "webgpu/gpu.hpp"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL_events.h>
 #include <aurora/rmlui.hpp>
 #include <dawn/webgpu_cpp.h>
 

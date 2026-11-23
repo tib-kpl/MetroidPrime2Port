@@ -10,11 +10,18 @@
 
 #include <aurora/aurora.h>
 #include <aurora/event.h>
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_hints.h>
-#include <SDL2/SDL_joystick.h>
-#include <SDL2/SDL_pixels.h>
-#include <SDL2/SDL_syswm.h>
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_properties.h>
+#include <SDL3/SDL_render.h>
+#include <SDL3/SDL_surface.h>
+#include <SDL3/SDL_video.h>
+#include <SDL3/SDL_init.h>
+#include <SDL3/SDL_hints.h>
+#include <SDL3/SDL_stdinc.h>
+#include <SDL3/SDL_joystick.h>
+#include <SDL3/SDL_timer.h>
+#include <SDL3/SDL_pixels.h>
 #include <tracy/Tracy.hpp>
 
 #if defined(SDL_PLATFORM_ANDROID)
@@ -44,7 +51,6 @@ SDL_Window* g_window;
 SDL_Renderer* g_renderer;
 SDL_GLContext g_glContext;
 void* g_kmsdrmEglSurface;
-void* g_kmsdrmEglDisplay;
 float g_frameBufferScale = 0.f;
 bool g_frameBufferAspectFit = false;
 AuroraWindowSize g_windowSize;
@@ -71,16 +77,22 @@ bool g_gotFocus = false;
 
 void retain_event_strings(SDL_Event& event) {
   switch (event.type) {
-  case SDL_DROPFILE:
-  case SDL_DROPTEXT:
-    if (event.drop.file != nullptr) {
-      g_eventStrings.emplace_back(event.drop.file);
-      SDL_free(event.drop.file);
-      event.drop.file = const_cast<char*>(g_eventStrings.back().c_str());
-    }
+  case SDL_EVENT_DROP_BEGIN:
+  case SDL_EVENT_DROP_FILE:
+  case SDL_EVENT_DROP_TEXT:
+  case SDL_EVENT_DROP_COMPLETE:
+  case SDL_EVENT_DROP_POSITION:
     break;
   default:
     return;
+  }
+  if (event.drop.source != nullptr) {
+    g_eventStrings.emplace_back(event.drop.source);
+    event.drop.source = g_eventStrings.back().c_str();
+  }
+  if (event.drop.data != nullptr) {
+    g_eventStrings.emplace_back(event.drop.data);
+    event.drop.data = g_eventStrings.back().c_str();
   }
 }
 
@@ -124,7 +136,9 @@ void resize_swapchain() noexcept {
   }
   g_windowSize = size;
   if (g_renderer != nullptr) {
-    SDL_RenderSetScale(g_renderer, size.scale, size.scale);
+    SDL_SetRenderLogicalPresentation(g_renderer, static_cast<int>(size.native_fb_width),
+                                     static_cast<int>(size.native_fb_height), SDL_LOGICAL_PRESENTATION_DISABLED);
+    SDL_SetRenderScale(g_renderer, size.scale, size.scale);
   }
 #ifdef AURORA_ENABLE_GX
   if (is_surface_changing()) {
@@ -149,51 +163,29 @@ void set_window_icon() noexcept {
   if (g_config.iconRGBA8 == nullptr) {
     return;
   }
-  auto* iconSurface = SDL_CreateRGBSurfaceFrom(g_config.iconRGBA8, static_cast<int>(g_config.iconWidth),
-                                                static_cast<int>(g_config.iconHeight), 32,
-                                                static_cast<int>(4 * g_config.iconWidth), 0x000000ff,
-                                                0x0000ff00, 0x00ff0000, 0xff000000);
+  auto* iconSurface =
+      SDL_CreateSurfaceFrom(static_cast<int>(g_config.iconWidth), static_cast<int>(g_config.iconHeight),
+                            SDL_GetPixelFormatForMasks(32, 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000),
+                            g_config.iconRGBA8, static_cast<int>(4 * g_config.iconWidth));
   AURORA_ASSERT(iconSurface != nullptr, "Failed to create icon surface: {}", SDL_GetError());
-  SDL_SetWindowIcon(g_window, iconSurface);
-  SDL_FreeSurface(iconSurface);
+  TRY_WARN(SDL_SetWindowIcon(g_window, iconSurface), "Failed to set window icon: {}", SDL_GetError());
+  SDL_DestroySurface(iconSurface);
 }
 
 bool targets_primary_window(const SDL_Event* event) noexcept {
-  Uint32 eventWindowID = 0;
-  switch (event->type) {
-  case SDL_WINDOWEVENT:
-    eventWindowID = event->window.windowID;
-    break;
-  case SDL_KEYDOWN:
-  case SDL_KEYUP:
-    eventWindowID = event->key.windowID;
-    break;
-  case SDL_MOUSEMOTION:
-    eventWindowID = event->motion.windowID;
-    break;
-  case SDL_MOUSEBUTTONDOWN:
-  case SDL_MOUSEBUTTONUP:
-    eventWindowID = event->button.windowID;
-    break;
-  case SDL_MOUSEWHEEL:
-    eventWindowID = event->wheel.windowID;
-    break;
-  default:
-    break;
-  }
-  const SDL_Window* eventWindow = eventWindowID == 0 ? nullptr : SDL_GetWindowFromID(eventWindowID);
+  const SDL_Window* eventWindow = SDL_GetWindowFromEvent(event);
   return eventWindow == nullptr || eventWindow == g_window;
 }
 
-int SDLCALL lifecycle_event_watch(void*, SDL_Event* event) {
+bool SDLCALL lifecycle_event_watch(void*, SDL_Event* event) {
   if (targets_primary_window(event)) {
     switch (event->type) {
 #if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_APPLE)
-    case SDL_WINDOWEVENT_MINIMIZED:
+    case SDL_EVENT_WINDOW_MINIMIZED:
       time::internal::set_pause_reason(time::internal::PauseReason::Background, true);
       g_backgrounded.store(true, std::memory_order_relaxed);
       break;
-    case SDL_WINDOWEVENT_RESTORED:
+    case SDL_EVENT_WINDOW_RESTORED:
       g_backgrounded.store(false, std::memory_order_relaxed);
       time::internal::set_pause_reason(time::internal::PauseReason::Background, false);
       break;
@@ -229,51 +221,67 @@ void process_event(SDL_Event& event) {
   }
 
   switch (event.type) {
-  case SDL_WINDOWEVENT: {
+  case SDL_EVENT_WINDOW_MOVED: {
     if (!primaryWindow) {
       break;
     }
-    if (event.window.event == SDL_WINDOWEVENT_MOVED) {
-      g_events.push_back(AuroraEvent{
-          .type = AURORA_WINDOW_MOVED,
-          .windowPos = {.x = event.window.data1, .y = event.window.data2},
-      });
-    } else if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
-               event.window.event == SDL_WINDOWEVENT_RESIZED) {
-      resize_swapchain();
-      g_events.push_back(AuroraEvent{
-          .type = AURORA_WINDOW_RESIZED,
-          .windowSize = get_window_size(),
-      });
-    } else if (event.window.event == SDL_WINDOWEVENT_CLOSE) {
-      g_events.push_back(AuroraEvent{
-        .type = AURORA_EXIT,
-      });
-    }
+    g_events.push_back(AuroraEvent{
+        .type = AURORA_WINDOW_MOVED,
+        .windowPos = {.x = event.window.data1, .y = event.window.data2},
+    });
     break;
   }
-  case SDL_CONTROLLERDEVICEADDED: {
-    auto instance = input::add_controller(event.cdevice.which);
+  case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED: {
+    if (!primaryWindow) {
+      break;
+    }
+    resize_swapchain();
+    g_events.push_back(AuroraEvent{
+        .type = AURORA_DISPLAY_SCALE_CHANGED,
+        .windowSize = get_window_size(),
+    });
+    break;
+  }
+  case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
+    if (!primaryWindow) {
+      break;
+    }
+    resize_swapchain();
+    g_events.push_back(AuroraEvent{
+        .type = AURORA_WINDOW_RESIZED,
+        .windowSize = get_window_size(),
+    });
+    break;
+  }
+  case SDL_EVENT_GAMEPAD_ADDED: {
+    auto instance = input::add_controller(event.gdevice.which);
     g_events.push_back(AuroraEvent{
         .type = AURORA_CONTROLLER_ADDED,
         .controller = instance,
     });
     break;
   }
-  case SDL_CONTROLLERDEVICEREMOVED: {
-    input::remove_controller(event.cdevice.which);
+  case SDL_EVENT_GAMEPAD_REMOVED: {
+    input::remove_controller(event.gdevice.which);
     g_events.push_back(AuroraEvent{
         .type = AURORA_CONTROLLER_REMOVED,
-        .controller = event.cdevice.which,
+        .controller = event.gdevice.which,
     });
     break;
   }
-  case SDL_MOUSEWHEEL:
+  case SDL_EVENT_MOUSE_WHEEL:
     if (primaryWindow) {
       input::set_mouse_scroll(event.wheel.x, event.wheel.y);
     }
     break;
-  case SDL_QUIT:
+  case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+    if (primaryWindow) {
+      g_events.push_back(AuroraEvent{
+          .type = AURORA_EXIT,
+      });
+    }
+    break;
+  case SDL_EVENT_QUIT:
     g_events.push_back(AuroraEvent{
         .type = AURORA_EXIT,
     });
@@ -319,9 +327,9 @@ const AuroraEvent* poll_events() {
   // thread, and a slow driver makes that a freeze of seconds (issue #278).
   {
     ZoneScopedN("SDL_UpdateJoysticks");
-    const uint64_t start = SDL_GetTicks64() * 1000000ULL;
-    SDL_JoystickUpdate();
-    g_joystickUpdateNs = SDL_GetTicks64() * 1000000ULL - start;
+    const uint64_t start = SDL_GetTicksNS();
+    SDL_UpdateJoysticks();
+    g_joystickUpdateNs = SDL_GetTicksNS() - start;
   }
   if (is_paused()) {
     // The application may service main-thread audio and I/O completions even
@@ -350,7 +358,7 @@ const AuroraEvent* poll_events() {
 }
 
 bool create_window(AuroraBackend backend) {
-  Uint32 flags = SDL_WINDOW_ALLOW_HIGHDPI;
+  SDL_WindowFlags flags = SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #if TARGET_OS_IOS || TARGET_OS_TV
   flags |= SDL_WINDOW_FULLSCREEN;
 #else
@@ -359,9 +367,9 @@ bool create_window(AuroraBackend backend) {
     flags |= SDL_WINDOW_FULLSCREEN;
   }
 #endif
-#if defined(__linux__)
+#if defined(SDL_PLATFORM_LINUX)
   const char* videoDriver = SDL_GetCurrentVideoDriver();
-  if (videoDriver != nullptr && SDL_strcasecmp(videoDriver, "kmsdrm") == 0) {
+  if (videoDriver != nullptr && SDL_strcmp(videoDriver, "kmsdrm") == 0) {
     flags |= SDL_WINDOW_FULLSCREEN;
     if (backend == BACKEND_VULKAN) {
       flags |= SDL_WINDOW_VULKAN;
@@ -393,7 +401,7 @@ bool create_window(AuroraBackend backend) {
   }
   // Shrink a default that doesn't fit the desktop, keeping its aspect ratio.
   SDL_Rect usable{};
-  if (SDL_GetDisplayUsableBounds(0, &usable) == 0 && usable.w > 0 && usable.h > 0) {
+  if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) && usable.w > 0 && usable.h > 0) {
     const float fit = std::min(static_cast<float>(usable.w) / static_cast<float>(width),
                                static_cast<float>(usable.h) / static_cast<float>(height));
     if (fit < 1.f) {
@@ -409,12 +417,27 @@ bool create_window(AuroraBackend backend) {
     posY = SDL_WINDOWPOS_UNDEFINED;
   }
 
-    g_window = SDL_CreateWindow(g_config.appName, posX, posY, width, height, flags);
+  const auto props = SDL_CreateProperties();
+  TRY(SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, g_config.appName), "Failed to set {}: {}",
+      SDL_PROP_WINDOW_CREATE_TITLE_STRING, SDL_GetError());
+  TRY(SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, posX), "Failed to set {}: {}",
+      SDL_PROP_WINDOW_CREATE_X_NUMBER, SDL_GetError());
+  TRY(SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, posY), "Failed to set {}: {}",
+      SDL_PROP_WINDOW_CREATE_Y_NUMBER, SDL_GetError());
+  TRY(SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, width), "Failed to set {}: {}",
+      SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, SDL_GetError());
+  TRY(SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height), "Failed to set {}: {}",
+      SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, SDL_GetError());
+  TRY(SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, flags), "Failed to set {}: {}",
+      SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, SDL_GetError());
+  TRY(SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_EXTERNAL_GRAPHICS_CONTEXT_BOOLEAN, backend != BACKEND_NULL),
+      "Failed to set {}: {}", SDL_PROP_WINDOW_CREATE_EXTERNAL_GRAPHICS_CONTEXT_BOOLEAN, SDL_GetError());
+  g_window = SDL_CreateWindowWithProperties(props);
   if (g_window == nullptr) {
     Log.error("Failed to create window: {}", SDL_GetError());
     return false;
   }
-#if defined(__linux__)
+#if defined(SDL_PLATFORM_LINUX)
   if ((flags & SDL_WINDOW_OPENGL) != 0) {
     g_glContext = SDL_GL_CreateContext(g_window);
     if (g_glContext == nullptr) {
@@ -423,48 +446,35 @@ bool create_window(AuroraBackend backend) {
       g_window = nullptr;
       return false;
     }
-    if (videoDriver != nullptr && SDL_strcasecmp(videoDriver, "kmsdrm") == 0) {
-      using EGLGetCurrentSurfaceProc = void* (SDLCALL *)(unsigned int);
-      using EGLGetCurrentDisplayProc = void* (SDLCALL *)(void);
+    if (videoDriver != nullptr && SDL_strcmp(videoDriver, "kmsdrm") == 0) {
+      using EGLGetCurrentSurfaceProc = SDL_EGLSurface (*)(int);
       const auto getCurrentSurface = reinterpret_cast<EGLGetCurrentSurfaceProc>(
-          SDL_GL_GetProcAddress("eglGetCurrentSurface"));
-      const auto getCurrentDisplay = reinterpret_cast<EGLGetCurrentDisplayProc>(
-          SDL_GL_GetProcAddress("eglGetCurrentDisplay"));
+          SDL_EGL_GetProcAddress("eglGetCurrentSurface"));
       if (getCurrentSurface == nullptr) {
-        Log.error("Failed to load eglGetCurrentSurface from SDL2: {}", SDL_GetError());
-        SDL_GL_DeleteContext(g_glContext);
-        g_glContext = nullptr;
-        SDL_DestroyWindow(g_window);
-        g_window = nullptr;
-        return false;
-      }
-      if (getCurrentDisplay == nullptr) {
-        Log.error("Failed to load eglGetCurrentDisplay from SDL2: {}", SDL_GetError());
-        SDL_GL_DeleteContext(g_glContext);
+        Log.error("Failed to load eglGetCurrentSurface from SDL's EGL library: {}", SDL_GetError());
+        SDL_GL_DestroyContext(g_glContext);
         g_glContext = nullptr;
         SDL_DestroyWindow(g_window);
         g_window = nullptr;
         return false;
       }
       g_kmsdrmEglSurface = getCurrentSurface(0x3059);
-      g_kmsdrmEglDisplay = getCurrentDisplay();
-      if (g_kmsdrmEglSurface == nullptr || g_kmsdrmEglDisplay == nullptr) {
-        Log.error("SDL2 KMSDRM EGL context has no current display or draw surface");
-        SDL_GL_DeleteContext(g_glContext);
+      if (g_kmsdrmEglSurface == nullptr) {
+        Log.error("SDL KMSDRM EGL context has no current draw surface");
+        SDL_GL_DestroyContext(g_glContext);
         g_glContext = nullptr;
         SDL_DestroyWindow(g_window);
         g_window = nullptr;
         return false;
       }
-      Log.info("Captured SDL2 KMSDRM EGL display and draw surface for Dawn");
-      if (SDL_GL_MakeCurrent(nullptr, nullptr) != 0) {
+      Log.info("Captured SDL's KMSDRM EGL draw surface for Dawn");
+      if (!SDL_GL_MakeCurrent(nullptr, nullptr)) {
         Log.error("Failed to release SDL's KMSDRM GL context after surface capture: {}", SDL_GetError());
-        SDL_GL_DeleteContext(g_glContext);
+        SDL_GL_DestroyContext(g_glContext);
         g_glContext = nullptr;
         SDL_DestroyWindow(g_window);
         g_window = nullptr;
         g_kmsdrmEglSurface = nullptr;
-        g_kmsdrmEglDisplay = nullptr;
         return false;
       }
     }
@@ -479,8 +489,12 @@ bool create_renderer() {
   if (g_window == nullptr) {
     return false;
   }
-  const Uint32 flags = g_config.vsync ? SDL_RENDERER_PRESENTVSYNC : 0;
-  g_renderer = SDL_CreateRenderer(g_window, -1, flags);
+  const auto props = SDL_CreateProperties();
+  TRY(SDL_SetPointerProperty(props, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, g_window), "Failed to set {}: {}",
+      SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, SDL_GetError());
+  TRY(SDL_SetNumberProperty(props, SDL_PROP_RENDERER_CREATE_PRESENT_VSYNC_NUMBER, SDL_RENDERER_VSYNC_ADAPTIVE),
+      "Failed to set {}: {}", SDL_PROP_RENDERER_CREATE_PRESENT_VSYNC_NUMBER, SDL_GetError());
+  g_renderer = SDL_CreateRendererWithProperties(props);
   if (g_renderer == nullptr) {
     Log.error("Failed to create renderer: {}", SDL_GetError());
     return false;
@@ -495,19 +509,18 @@ void destroy_window() {
   }
   if (g_window != nullptr) {
     if (g_glContext != nullptr) {
-      SDL_GL_DeleteContext(g_glContext);
+      SDL_GL_DestroyContext(g_glContext);
       g_glContext = nullptr;
     }
     SDL_DestroyWindow(g_window);
     g_window = nullptr;
   }
   g_kmsdrmEglSurface = nullptr;
-  g_kmsdrmEglDisplay = nullptr;
 }
 
 void show_window() {
   if (g_window != nullptr) {
-    SDL_ShowWindow(g_window);
+    TRY_WARN(SDL_ShowWindow(g_window), "Failed to show window: {}", SDL_GetError());
   }
 }
 
@@ -515,10 +528,7 @@ bool initialize() {
   /* We don't want to initialize anything input related here, otherwise the add events will get lost to the void */
   TRY(SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight"), "Error setting {}: {}", SDL_HINT_ORIENTATIONS,
       SDL_GetError());
-  if (SDL_Init(SDL_INIT_EVENTS | SDL_INIT_VIDEO) != 0) {
-    Log.error("Error initializing SDL: {}", SDL_GetError());
-    return false;
-  }
+  TRY(SDL_InitSubSystem(SDL_INIT_EVENTS | SDL_INIT_VIDEO), "Error initializing SDL: {}", SDL_GetError());
   time::internal::set_pause_reason(time::internal::PauseReason::Surface,
                                    !g_surfaceReady.load(std::memory_order_acquire));
 
@@ -526,13 +536,15 @@ bool initialize() {
   TRY(SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0"), "Error setting {}: {}",
       SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, SDL_GetError());
 #endif
-    TRY(SDL_SetHint(SDL_HINT_JOYSTICK_GAMECUBE_RUMBLE_BRAKE, "1"), "Error setting {}: {}",
-      SDL_HINT_JOYSTICK_GAMECUBE_RUMBLE_BRAKE, SDL_GetError());
+  TRY(SDL_SetHint(SDL_HINT_SCREENSAVER_INHIBIT_ACTIVITY_NAME, g_config.appName), "Error setting {}: {}",
+      SDL_HINT_SCREENSAVER_INHIBIT_ACTIVITY_NAME, SDL_GetError());
+  TRY(SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_GAMECUBE_RUMBLE_BRAKE, "1"), "Error setting {}: {}",
+      SDL_HINT_JOYSTICK_HIDAPI_GAMECUBE_RUMBLE_BRAKE, SDL_GetError());
   // poll_events updates the joysticks itself, timed.
   TRY(SDL_SetHint(SDL_HINT_AUTO_UPDATE_JOYSTICKS, "0"), "Error setting {}: {}", SDL_HINT_AUTO_UPDATE_JOYSTICKS,
       SDL_GetError());
 
-  SDL_DisableScreenSaver();
+  TRY(SDL_DisableScreenSaver(), "Error disabling screensaver: {}", SDL_GetError());
   if (g_config.allowJoystickBackgroundEvents) {
     TRY(SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1"), "Error setting {}: {}",
         SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, SDL_GetError());
@@ -542,14 +554,14 @@ bool initialize() {
 }
 
 bool initialize_event_watch() {
-  SDL_AddEventWatch(lifecycle_event_watch, nullptr);
+  TRY(SDL_AddEventWatch(lifecycle_event_watch, nullptr), "Error adding SDL event watch: {}", SDL_GetError());
   return true;
 }
 
 void shutdown() {
-  SDL_DelEventWatch(lifecycle_event_watch, nullptr);
+  SDL_RemoveEventWatch(lifecycle_event_watch, nullptr);
   destroy_window();
-  SDL_EnableScreenSaver();
+  TRY_WARN(SDL_EnableScreenSaver(), "Error enabling screensaver: {}", SDL_GetError());
   SDL_Quit();
 }
 
@@ -590,15 +602,8 @@ Vec2<int> frame_buffer_size_for_scale(int native_fb_w, int native_fb_h, float fr
 bool get_frame_buffer_size_for_scale(float scale, uint32_t* width, uint32_t* height) {
   int native_fb_w = 0;
   int native_fb_h = 0;
-  if (g_window == nullptr) {
-    return false;
-  }
-  if (g_glContext != nullptr) {
-    SDL_GL_GetDrawableSize(g_window, &native_fb_w, &native_fb_h);
-  } else {
-    SDL_GetWindowSize(g_window, &native_fb_w, &native_fb_h);
-  }
-  if (native_fb_w <= 0 || native_fb_h <= 0) {
+  if (g_window == nullptr || !SDL_GetWindowSizeInPixels(g_window, &native_fb_w, &native_fb_h) || native_fb_w <= 0 ||
+      native_fb_h <= 0) {
     return false;
   }
   const auto [fb_w, fb_h] = frame_buffer_size_for_scale(native_fb_w, native_fb_h, scale);
@@ -612,24 +617,13 @@ AuroraWindowSize get_window_size() {
   int height = 0;
   int native_fb_w = 0;
   int native_fb_h = 0;
-  SDL_GetWindowSize(g_window, &width, &height);
-  if (g_glContext != nullptr) {
-    SDL_GL_GetDrawableSize(g_window, &native_fb_w, &native_fb_h);
-  } else {
-    native_fb_w = width;
-    native_fb_h = height;
-  }
+  AURORA_ASSERT(SDL_GetWindowSize(g_window, &width, &height), "Failed to get window size: {}", SDL_GetError());
+  AURORA_ASSERT(SDL_GetWindowSizeInPixels(g_window, &native_fb_w, &native_fb_h), "Failed to get window size in pixels: {}",
+         SDL_GetError());
 
   const auto [fb_w, fb_h] = frame_buffer_size_for_scale(native_fb_w, native_fb_h, g_frameBufferScale);
 
-  float dpi = 96.f;
-  float diagonal = 0.f;
-  float horizontal = 0.f;
-  float vertical = 0.f;
-  const int displayIndex = SDL_GetWindowDisplayIndex(g_window);
-  const float scale = displayIndex >= 0 && SDL_GetDisplayDPI(displayIndex, &diagonal, &horizontal, &vertical) == 0
-                          ? diagonal / 96.f
-                          : dpi / 96.f;
+  const float scale = SDL_GetWindowDisplayScale(g_window);
   return {
       .width = static_cast<uint32_t>(width),
       .height = static_cast<uint32_t>(height),
@@ -645,15 +639,11 @@ SDL_Window* get_sdl_window() { return g_window; }
 void* get_kmsdrm_egl_surface(SDL_Window* window) noexcept {
   return window == g_window ? g_kmsdrmEglSurface : nullptr;
 }
-void* get_kmsdrm_egl_display() noexcept { return g_kmsdrmEglDisplay; }
-void* get_kmsdrm_egl_proc(const char* proc) noexcept {
-  return SDL_GL_GetProcAddress(proc);
-}
 bool make_kmsdrm_gl_context_current(bool current) noexcept {
   if (g_window == nullptr || g_glContext == nullptr) {
     return false;
   }
-  return SDL_GL_MakeCurrent(current ? g_window : nullptr, current ? g_glContext : nullptr) == 0;
+  return SDL_GL_MakeCurrent(current ? g_window : nullptr, current ? g_glContext : nullptr);
 }
 
 const void* get_native_window_handle() noexcept {
@@ -753,28 +743,27 @@ bool push_custom_event(CustomEvent eventType) {
 }
 
 void set_title(const char* title) {
-  SDL_SetWindowTitle(g_window, title);
+  TRY_WARN(SDL_SetWindowTitle(g_window, title), "Failed to set window title: {}", SDL_GetError());
 }
 
 void set_fullscreen(bool fullscreen) {
-  if (SDL_SetWindowFullscreen(g_window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) != 0) {
-    Log.warn("Failed to set window fullscreen: {}", SDL_GetError());
-  }
+  TRY_WARN(SDL_SetWindowFullscreen(g_window, fullscreen), "Failed to set window fullscreen: {}", SDL_GetError());
 }
 
 bool get_fullscreen() { return (SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN) != 0u; }
 
 void set_window_size(uint32_t width, uint32_t height) {
-  SDL_RestoreWindow(g_window);
-  SDL_SetWindowSize(g_window, static_cast<int>(width), static_cast<int>(height));
+  TRY_WARN(SDL_RestoreWindow(g_window), "Failed to un-maximize window: {}", SDL_GetError());
+  TRY_WARN(SDL_SetWindowSize(g_window, width, height), "Failed to set window size: {}", SDL_GetError());
 }
 
 void set_window_position(uint32_t x, uint32_t y) {
-  SDL_SetWindowPosition(g_window, static_cast<int>(x), static_cast<int>(y));
+  TRY_WARN(SDL_SetWindowPosition(g_window, x, y), "Failed to set window position: {}", SDL_GetError());
 }
 
 void center_window() {
-  SDL_SetWindowPosition(g_window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+  TRY_WARN(SDL_SetWindowPosition(g_window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED),
+           "Failed to center window: {}", SDL_GetError());
 }
 
 static void push_future_resize_event() {

@@ -19,7 +19,7 @@
 #include "port_update_toast.h"
 #include "port_video.h"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <aurora/aurora.h>
 #include <aurora/gfx.h>
 #include <imgui.h>
@@ -463,9 +463,19 @@ std::vector< PortGpuDriver::Driver > sGpuDrivers;
 bool sGpuDriversListed = false;
 
 void OpenGpuDriverDialog() {
-  std::lock_guard lock(sGpuDriverPickMutex);
-  sGpuDriverPick = std::string("\x01") + "Native file picking is unavailable in the SDL2 build.";
-  sGpuDriverDialogOpen = false;
+  int windowCount = 0;
+  SDL_Window** windows = SDL_GetWindows(&windowCount);
+  SDL_Window* window = windows != nullptr && windowCount > 0 ? windows[0] : nullptr;
+  SDL_free(windows);
+  const SDL_DialogFileCallback done = [](void*, const char* const* files, int) {
+    std::lock_guard lock(sGpuDriverPickMutex);
+    // Empty = cancelled; a leading \x01 marks a failed dialog's error.
+    sGpuDriverPick = files != nullptr ? std::string(files[0] != nullptr ? files[0] : "")
+                                      : std::string("\x01") + SDL_GetError();
+    sGpuDriverDialogOpen = false;
+  };
+  sGpuDriverDialogOpen = true;
+  SDL_ShowOpenFileDialog(done, nullptr, window, nullptr, 0, nullptr, false);
 }
 
 void SetGpuDriver(const std::string& id) {

@@ -17,14 +17,13 @@
 #include <dolphin/pad.h>
 #include <aurora/texture.hpp>
 
-#include <SDL2/SDL_events.h>
-#include <SDL2/SDL_gamecontroller.h>
-#include <SDL2/SDL_scancode.h>
-#include <SDL2/SDL_timer.h>
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_gamepad.h>
+#include <SDL3/SDL_scancode.h>
+#include <SDL3/SDL_timer.h>
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -298,24 +297,26 @@ struct GameCubeButton {
   const char* stem;
 };
 constexpr GameCubeButton kGameCubeButtons[] = {
-    {SDL_CONTROLLER_BUTTON_A, PAD_BUTTON_A, "gamecube_a"},
-    {SDL_CONTROLLER_BUTTON_X, PAD_BUTTON_B, "gamecube_b"},
-    {SDL_CONTROLLER_BUTTON_B, PAD_BUTTON_X, "gamecube_x"},
-    {SDL_CONTROLLER_BUTTON_Y, PAD_BUTTON_Y, "gamecube_y"},
-    {SDL_CONTROLLER_BUTTON_START, PAD_BUTTON_START, "gamecube_start"},
-    {SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, PAD_TRIGGER_Z, "gamecube_z"},
+    {SDL_GAMEPAD_BUTTON_SOUTH, PAD_BUTTON_A, "gamecube_a"},
+    {SDL_GAMEPAD_BUTTON_WEST, PAD_BUTTON_B, "gamecube_b"},
+    {SDL_GAMEPAD_BUTTON_EAST, PAD_BUTTON_X, "gamecube_x"},
+    {SDL_GAMEPAD_BUTTON_NORTH, PAD_BUTTON_Y, "gamecube_y"},
+    {SDL_GAMEPAD_BUTTON_START, PAD_BUTTON_START, "gamecube_start"},
+    {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, PAD_TRIGGER_Z, "gamecube_z"},
+    {SDL_GAMEPAD_BUTTON_MISC3, PAD_TRIGGER_L, "gamecube_l"},
+    {SDL_GAMEPAD_BUTTON_MISC4, PAD_TRIGGER_R, "gamecube_r"},
     {PAD_NATIVE_BUTTON_TRIGGER_LEFT, PAD_TRIGGER_L, "gamecube_l"},
     {PAD_NATIVE_BUTTON_TRIGGER_RIGHT, PAD_TRIGGER_R, "gamecube_r"},
 };
 constexpr GameCubeButton kNsoGameCubeButtons[] = {
-    {SDL_CONTROLLER_BUTTON_A, PAD_BUTTON_A, "gamecube_a"},
-    {SDL_CONTROLLER_BUTTON_X, PAD_BUTTON_B, "gamecube_b"},
-    {SDL_CONTROLLER_BUTTON_B, PAD_BUTTON_X, "gamecube_x"},
-    {SDL_CONTROLLER_BUTTON_Y, PAD_BUTTON_Y, "gamecube_y"},
-    {SDL_CONTROLLER_BUTTON_START, PAD_BUTTON_START, "gamecube_start"},
-    {SDL_CONTROLLER_BUTTON_BACK, PAD_TRIGGER_Z, "gamecube_z"},
-    {SDL_CONTROLLER_BUTTON_LEFTSHOULDER, PAD_TRIGGER_L, "gamecube_l"},
-    {SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, PAD_TRIGGER_R, "gamecube_r"},
+    {SDL_GAMEPAD_BUTTON_SOUTH, PAD_BUTTON_A, "gamecube_a"},
+    {SDL_GAMEPAD_BUTTON_WEST, PAD_BUTTON_B, "gamecube_b"},
+    {SDL_GAMEPAD_BUTTON_EAST, PAD_BUTTON_X, "gamecube_x"},
+    {SDL_GAMEPAD_BUTTON_NORTH, PAD_BUTTON_Y, "gamecube_y"},
+    {SDL_GAMEPAD_BUTTON_START, PAD_BUTTON_START, "gamecube_start"},
+    {SDL_GAMEPAD_BUTTON_BACK, PAD_TRIGGER_Z, "gamecube_z"},
+    {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, PAD_TRIGGER_L, "gamecube_l"},
+    {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, PAD_TRIGGER_R, "gamecube_r"},
     {PAD_NATIVE_BUTTON_TRIGGER_LEFT, PAD_TRIGGER_L, "gamecube_l"},
     {PAD_NATIVE_BUTTON_TRIGGER_RIGHT, PAD_TRIGGER_R, "gamecube_r"},
 };
@@ -375,26 +376,26 @@ std::string GameCubeStemForButton(PADButton button) {
 // are (tools/make_prompt_glyphs.py writes "<device>_<suffix>").
 const char* SuffixForSdlButton(int button) {
   switch (button) {
-  case SDL_CONTROLLER_BUTTON_A: return "south";
-  case SDL_CONTROLLER_BUTTON_B: return "east";
-  case SDL_CONTROLLER_BUTTON_X: return "west";
-  case SDL_CONTROLLER_BUTTON_Y: return "north";
-  case SDL_CONTROLLER_BUTTON_START: return "start";
-  case SDL_CONTROLLER_BUTTON_BACK: return "back";
-  case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return "leftshoulder";
-  case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return "rightshoulder";
-  case SDL_CONTROLLER_BUTTON_LEFTSTICK: return "leftstick";
-  case SDL_CONTROLLER_BUTTON_RIGHTSTICK: return "rightstick";
-  case SDL_CONTROLLER_BUTTON_DPAD_UP: return "dpad_up";
-  case SDL_CONTROLLER_BUTTON_DPAD_DOWN: return "dpad_down";
-  case SDL_CONTROLLER_BUTTON_DPAD_LEFT: return "dpad_left";
-  case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return "dpad_right";
+  case SDL_GAMEPAD_BUTTON_SOUTH: return "south";
+  case SDL_GAMEPAD_BUTTON_EAST: return "east";
+  case SDL_GAMEPAD_BUTTON_WEST: return "west";
+  case SDL_GAMEPAD_BUTTON_NORTH: return "north";
+  case SDL_GAMEPAD_BUTTON_START: return "start";
+  case SDL_GAMEPAD_BUTTON_BACK: return "back";
+  case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: return "leftshoulder";
+  case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: return "rightshoulder";
+  case SDL_GAMEPAD_BUTTON_LEFT_STICK: return "leftstick";
+  case SDL_GAMEPAD_BUTTON_RIGHT_STICK: return "rightstick";
+  case SDL_GAMEPAD_BUTTON_DPAD_UP: return "dpad_up";
+  case SDL_GAMEPAD_BUTTON_DPAD_DOWN: return "dpad_down";
+  case SDL_GAMEPAD_BUTTON_DPAD_LEFT: return "dpad_left";
+  case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return "dpad_right";
   // Only the Steam Deck set has art for the back grips; elsewhere the file is missing and the
   // prompt keeps its static icon.
-  case SDL_CONTROLLER_BUTTON_PADDLE1: return "leftpaddle1";
-  case SDL_CONTROLLER_BUTTON_PADDLE2: return "rightpaddle1";
-  case SDL_CONTROLLER_BUTTON_PADDLE3: return "leftpaddle2";
-  case SDL_CONTROLLER_BUTTON_PADDLE4: return "rightpaddle2";
+  case SDL_GAMEPAD_BUTTON_LEFT_PADDLE1: return "leftpaddle1";
+  case SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1: return "rightpaddle1";
+  case SDL_GAMEPAD_BUTTON_LEFT_PADDLE2: return "leftpaddle2";
+  case SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2: return "rightpaddle2";
   case PAD_NATIVE_BUTTON_TRIGGER_LEFT: return "lt";
   case PAD_NATIVE_BUTTON_TRIGGER_RIGHT: return "rt";
   default: return nullptr;
@@ -430,8 +431,12 @@ bool IsSystemKey(SDL_Scancode scancode) {
   case SDL_SCANCODE_VOLUMEUP:
   case SDL_SCANCODE_VOLUMEDOWN:
   case SDL_SCANCODE_MUTE:
-  case SDL_SCANCODE_AUDIOPLAY:
-  case SDL_SCANCODE_AUDIOSTOP:
+  case SDL_SCANCODE_MEDIA_PLAY:
+  case SDL_SCANCODE_MEDIA_PAUSE:
+  case SDL_SCANCODE_MEDIA_PLAY_PAUSE:
+  case SDL_SCANCODE_MEDIA_NEXT_TRACK:
+  case SDL_SCANCODE_MEDIA_PREVIOUS_TRACK:
+  case SDL_SCANCODE_MEDIA_STOP:
   case SDL_SCANCODE_POWER:
     return true;
   default:
@@ -439,22 +444,7 @@ bool IsSystemKey(SDL_Scancode scancode) {
   }
 }
 
-bool IsTouchMouse(Uint32 which) { return which == SDL_TOUCH_MOUSEID; }
-
-bool IsVirtualControllerInstance(SDL_JoystickID instance) {
-  for (int index = 0; index < SDL_NumJoysticks(); ++index) {
-    if (SDL_JoystickGetDeviceInstanceID(index) == instance) {
-      return SDL_JoystickIsVirtual(index) == SDL_TRUE;
-    }
-  }
-  return false;
-}
-
-uint64_t NowNs() {
-  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                   std::chrono::steady_clock::now().time_since_epoch())
-                                   .count());
-}
+bool IsTouchMouse(SDL_MouseID which) { return which == SDL_TOUCH_MOUSEID || which == SDL_PEN_MOUSEID; }
 
 // Only deliberate input switches the device. The touch overlay is itself a
 // virtual pad, whose events would undo NoteTouchInput on the next pump; a touch
@@ -465,55 +455,55 @@ uint64_t NowNs() {
 // Deck trackpad or gyro sent as a mouse) would swap the icons back and forth,
 // so it never leaves the pad; it only turns keys into clicks once the keyboard
 // is already in use.
-int SDLCALL active_input_watch(void*, SDL_Event* event) {
+bool SDLCALL active_input_watch(void*, SDL_Event* event) {
   switch (event->type) {
-  case SDL_MOUSEMOTION:
+  case SDL_EVENT_MOUSE_MOTION:
     if (!IsTouchMouse(event->motion.which) &&
         sActiveInput.load(std::memory_order_relaxed) == ActiveInput::Keyboard) {
       sKeyInput.store(false, std::memory_order_relaxed);
     }
     break;
-  case SDL_MOUSEBUTTONDOWN:
+  case SDL_EVENT_MOUSE_BUTTON_DOWN:
     if (!IsTouchMouse(event->button.which)) {
       sActiveInput.store(ActiveInput::Keyboard, std::memory_order_relaxed);
       sKeyInput.store(false, std::memory_order_relaxed);
     }
     break;
-  case SDL_MOUSEWHEEL:
+  case SDL_EVENT_MOUSE_WHEEL:
     if (!IsTouchMouse(event->wheel.which)) {
       sActiveInput.store(ActiveInput::Keyboard, std::memory_order_relaxed);
       sKeyInput.store(false, std::memory_order_relaxed);
     }
     break;
-  case SDL_KEYDOWN:
+  case SDL_EVENT_KEY_DOWN:
     // Not TEXT_INPUT: on Android that is the soft keyboard typing into the
     // overlay, not a physical keyboard.
-    if (!event->key.repeat && !IsSystemKey(event->key.keysym.scancode)) {
+    if (!event->key.repeat && !IsSystemKey(event->key.scancode)) {
       sActiveInput.store(ActiveInput::Keyboard, std::memory_order_relaxed);
       sKeyInput.store(true, std::memory_order_relaxed);
     }
     break;
-  case SDL_CONTROLLERBUTTONDOWN:
-    if (!IsVirtualControllerInstance(event->cbutton.which)) {
+  case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+    if (!SDL_IsJoystickVirtual(event->gbutton.which)) {
       sActiveInput.store(ActiveInput::Pad, std::memory_order_relaxed);
     }
     break;
-  case SDL_CONTROLLERAXISMOTION:
+  case SDL_EVENT_GAMEPAD_AXIS_MOTION:
     // The same threshold the touch overlay uses to decide a pad is in use.
-    if (std::abs(static_cast<int>(event->caxis.value)) > 16000 &&
-      !IsVirtualControllerInstance(event->caxis.which)) {
+    if (std::abs(static_cast< int >(event->gaxis.value)) > 16000 &&
+        !SDL_IsJoystickVirtual(event->gaxis.which)) {
       sActiveInput.store(ActiveInput::Pad, std::memory_order_relaxed);
     }
     break;
-  case SDL_CONTROLLERDEVICEADDED:
-    if (!SDL_JoystickIsVirtual(event->cdevice.which)) {
+  case SDL_EVENT_GAMEPAD_ADDED:
+    if (!SDL_IsJoystickVirtual(event->gdevice.which)) {
       sActiveInput.store(ActiveInput::Pad, std::memory_order_relaxed);
     }
     break;
   default:
     break;
   }
-  return 1;
+  return true;
 }
 
 // True when the icons are served from the executable (PortEmbedded) rather than
@@ -1039,8 +1029,8 @@ std::string PadStemForAxis(PADAxis axis, const char* device, bool whole) {
   }
   if (in.device == PortInput::Device::PadAxis) {
     const int native = in.code;
-    const bool leftStick = native == SDL_CONTROLLER_AXIS_LEFTX || native == SDL_CONTROLLER_AXIS_LEFTY;
-    const bool rightStick = native == SDL_CONTROLLER_AXIS_RIGHTX || native == SDL_CONTROLLER_AXIS_RIGHTY;
+    const bool leftStick = native == SDL_GAMEPAD_AXIS_LEFTX || native == SDL_GAMEPAD_AXIS_LEFTY;
+    const bool rightStick = native == SDL_GAMEPAD_AXIS_RIGHTX || native == SDL_GAMEPAD_AXIS_RIGHTY;
     if (!leftStick && !rightStick) {
       return {};  // a trigger driving a stick: no art for that
     }
@@ -1050,7 +1040,7 @@ std::string PadStemForAxis(PADAxis axis, const char* device, bool whole) {
     }
     // SDL's Y axis is positive downwards.
     const bool positive = in.dir > 0;
-    const bool vertical = native == SDL_CONTROLLER_AXIS_LEFTY || native == SDL_CONTROLLER_AXIS_RIGHTY;
+    const bool vertical = native == SDL_GAMEPAD_AXIS_LEFTY || native == SDL_GAMEPAD_AXIS_RIGHTY;
     return stem + (vertical ? (positive ? "_down" : "_up") : (positive ? "_right" : "_left"));
   }
   const char* suffix = SuffixForSdlButton(static_cast<int>(PortInputDevices::PromptNativeButton(in)));
@@ -1410,7 +1400,7 @@ const char* ConfirmLabel() {
   }
   // A pad's mapping is positional: the game's A usually sits on the south button.
   u32 count = 0;
-  int native = SDL_CONTROLLER_BUTTON_A;
+  int native = SDL_GAMEPAD_BUTTON_SOUTH;
   if (const PADButtonMapping* list = PADGetButtonMappings(0, &count)) {
     for (u32 i = 0; i < count; ++i) {
       if (list[i].padButton == PAD_BUTTON_A) {
@@ -1421,9 +1411,9 @@ const char* ConfirmLabel() {
   const bool ps = std::strcmp(device, "playstation") == 0;
   const bool nintendo = std::strcmp(device, "switch") == 0;
   switch (native) {
-  case SDL_CONTROLLER_BUTTON_B: return ps ? "Circle" : nintendo ? "A" : "B";
-  case SDL_CONTROLLER_BUTTON_X: return ps ? "Square" : nintendo ? "Y" : "X";
-  case SDL_CONTROLLER_BUTTON_Y: return ps ? "Triangle" : nintendo ? "X" : "Y";
+  case SDL_GAMEPAD_BUTTON_EAST: return ps ? "Circle" : nintendo ? "A" : "B";
+  case SDL_GAMEPAD_BUTTON_WEST: return ps ? "Square" : nintendo ? "Y" : "X";
+  case SDL_GAMEPAD_BUTTON_NORTH: return ps ? "Triangle" : nintendo ? "X" : "Y";
   default: return ps ? "Cross" : nintendo ? "B" : "A";
   }
 }
@@ -1499,7 +1489,7 @@ void Poll() {
   static std::string sLastDevice;
   static bool sLastMap = false;
   static uint64_t sLastResolveNs = 0;
-  const uint64_t nowNs = NowNs();
+  const uint64_t nowNs = SDL_GetTicksNS();
   const bool map = PortHarness::MapScreenOpen();
   // Render button prompt rings changes what the boxes' disc and ring textures are served as.
   static bool sLastRing = PortOverlay::PromptRing();

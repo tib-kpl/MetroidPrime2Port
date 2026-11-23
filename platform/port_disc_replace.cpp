@@ -5,7 +5,11 @@
 #include "port_overlay_internal.h"
 #include "port_settings.h"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL_dialog.h>
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_iostream.h>
+#include <SDL3/SDL_properties.h>
+#include <SDL3/SDL_video.h>
 
 #include <cstdio>
 #include <cstring>
@@ -94,12 +98,12 @@ std::filesystem::path UserFolder() {
 
 std::string CheckImage(const std::string& path, std::string* revision) {
   uint8_t header[8] = {};
-  SDL_RWops* io = SDL_RWFromFile(path.c_str(), "rb");
+  SDL_IOStream* io = SDL_IOFromFile(path.c_str(), "rb");
   if (io == nullptr) {
     return "The file can't be opened.";
   }
-  const size_t got = SDL_RWread(io, header, 1, sizeof(header));
-  SDL_RWclose(io);
+  const size_t got = SDL_ReadIO(io, header, sizeof(header));
+  SDL_CloseIO(io);
   if (got != sizeof(header)) {
     return "The file is too short to be a disc image.";
   }
@@ -134,42 +138,42 @@ std::string CopyToUserFolder(const std::string& source, std::string* target, std
   const std::filesystem::path partial = folder / "disc.iso.part";
   const std::string partialName = PortUtf8::ToUtf8(partial);
 
-  SDL_RWops* in = SDL_RWFromFile(source.c_str(), "rb");
+  SDL_IOStream* in = SDL_IOFromFile(source.c_str(), "rb");
   if (in == nullptr) {
     std::fprintf(stderr, "port: could not read the picked image: %s: %s\n", source.c_str(), SDL_GetError());
     return "The picked image can't be read.";
   }
   // A plain image names its game in the first bytes: refuse a wrong one before minutes of copying.
   Uint8 header[8] = {};
-  if (SDL_RWread(in, header, 1, sizeof(header)) == sizeof(header)) {
+  if (SDL_ReadIO(in, header, sizeof(header)) == sizeof(header)) {
     const char* h = reinterpret_cast< const char* >(header);
     if (!port::entry::IsPickableDiscHeader(h, sizeof(header))) {
       const std::string why = DescribeDisc(h);
       std::fprintf(stderr, "port: not copying the picked image: %s\n", why.c_str());
-      SDL_RWclose(in);
+      SDL_CloseIO(in);
       return why;
     }
   }
-  if (SDL_RWseek(in, 0, RW_SEEK_SET) != 0) {
+  if (SDL_SeekIO(in, 0, SDL_IO_SEEK_SET) != 0) {
     // Some providers hand out a pipe, which cannot seek: start over.
-    SDL_RWclose(in);
-    in = SDL_RWFromFile(source.c_str(), "rb");
+    SDL_CloseIO(in);
+    in = SDL_IOFromFile(source.c_str(), "rb");
     if (in == nullptr) {
       std::fprintf(stderr, "port: could not reopen the picked image: %s\n", SDL_GetError());
       return "The picked image can't be read.";
     }
   }
-  const Sint64 total = SDL_RWsize(in);
+  const Sint64 total = SDL_GetIOSize(in);
   if (totalOut != nullptr) {
     totalOut->store(total > 0 ? static_cast< uint64_t >(total) : 0);
   }
   if (doneOut != nullptr) {
     doneOut->store(0);
   }
-  SDL_RWops* out = SDL_RWFromFile(partialName.c_str(), "wb");
+  SDL_IOStream* out = SDL_IOFromFile(partialName.c_str(), "wb");
   if (out == nullptr) {
     std::fprintf(stderr, "port: could not create %s: %s\n", partialName.c_str(), SDL_GetError());
-    SDL_RWclose(in);
+    SDL_CloseIO(in);
     return "The copy can't be created in the data folder.";
   }
 
@@ -182,15 +186,17 @@ std::string CopyToUserFolder(const std::string& source, std::string* target, std
       failure = "cancelled";
       break;
     }
-    const size_t got = SDL_RWread(in, buffer, 1, sizeof(buffer));
+    const size_t got = SDL_ReadIO(in, buffer, sizeof(buffer));
     if (got == 0) {
-      if (total > 0 && done < total) {
+      // Zero is also what a failed read returns; only the stream status tells end of file from an
+      // error that would leave a truncated copy.
+      if (SDL_GetIOStatus(in) != SDL_IO_STATUS_EOF) {
         std::fprintf(stderr, "port: reading the picked image failed: %s\n", SDL_GetError());
         failure = "Reading the picked image failed.";
       }
       break;
     }
-    if (SDL_RWwrite(out, buffer, 1, got) != got) {
+    if (SDL_WriteIO(out, buffer, got) != got) {
       std::fprintf(stderr, "port: writing %s failed: %s\n", partialName.c_str(), SDL_GetError());
       failure = "Writing the copy failed; the device may be full.";
       break;
@@ -208,10 +214,14 @@ std::string CopyToUserFolder(const std::string& source, std::string* target, std
       }
     }
   }
-  if (SDL_RWclose(in) != 0) {
+  if (!SDL_FlushIO(out) && failure.empty()) {
+    std::fprintf(stderr, "port: flushing %s failed: %s\n", partialName.c_str(), SDL_GetError());
+    failure = "Writing the copy failed.";
+  }
+  if (!SDL_CloseIO(in)) {
     std::fprintf(stderr, "port: closing the picked image failed: %s\n", SDL_GetError());
   }
-  if (SDL_RWclose(out) != 0 && failure.empty()) {
+  if (!SDL_CloseIO(out) && failure.empty()) {
     std::fprintf(stderr, "port: closing %s failed: %s\n", partialName.c_str(), SDL_GetError());
     failure = "Writing the copy failed.";
   }
@@ -316,7 +326,33 @@ void PickAsync() {
       return;
     }
   }
-  Finish(State::Failed, "SDL2 has no native file picker; restart with the replacement disc path.");
+  int windowCount = 0;
+  SDL_Window** windows = SDL_GetWindows(&windowCount);
+  SDL_Window* window = windows != nullptr && windowCount > 0 ? windows[0] : nullptr;
+  SDL_free(windows);
+  // Static: SDL reads the filters until the dialog closes.
+  static const SDL_DialogFileFilter filters[] = {
+      {"Metroid Prime 2: Echoes disc image (iso, gcm, rvz, wia, gcz, wbfs, ciso, nkit)",
+       "iso;gcm;rvz;wia;gcz;wbfs;ciso;nkit"},
+      {"All files", "*"},
+  };
+  const SDL_PropertiesID props = SDL_CreateProperties();
+  SDL_SetPointerProperty(props, SDL_PROP_FILE_DIALOG_FILTERS_POINTER, const_cast< SDL_DialogFileFilter* >(filters));
+  SDL_SetNumberProperty(props, SDL_PROP_FILE_DIALOG_NFILTERS_NUMBER, 2);
+  SDL_SetPointerProperty(props, SDL_PROP_FILE_DIALOG_WINDOW_POINTER, window);
+  SDL_SetStringProperty(props, SDL_PROP_FILE_DIALOG_TITLE_STRING,
+                        "Select your Metroid Prime 2: Echoes disc image (GameCube USA or PAL, or Metroid Prime Trilogy)");
+  SDL_ShowFileDialogWithProperties(
+      SDL_FILEDIALOG_OPENFILE,
+      [](void*, const char* const* files, int) {
+        if (files == nullptr) {
+          Finish(State::Failed, std::string("The file dialog failed: ") + SDL_GetError());
+        } else if (files[0] != nullptr) {
+          Start(files[0]);
+        } // an empty list is a cancel
+      },
+      nullptr, props);
+  SDL_DestroyProperties(props);
 }
 
 } // namespace PortDiscReplace

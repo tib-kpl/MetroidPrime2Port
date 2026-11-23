@@ -27,7 +27,7 @@ add_executable(io_tests
   ../lib/io.cpp
 )
 target_include_directories(io_tests PRIVATE ../lib)
-target_link_libraries(io_tests PRIVATE gtest gtest_main ${AURORA_SDL_TARGET})
+target_link_libraries(io_tests PRIVATE gtest gtest_main ${AURORA_SDL3_TARGET})
 aurora_copy_runtime_dlls(io_tests)
 gtest_discover_tests(io_tests)
 
@@ -131,7 +131,7 @@ if (AURORA_ENABLE_GX)
     absl::btree
     dawn::dawncpp_headers
     Tracy::TracyClient
-    ${AURORA_SDL_TARGET}
+    ${AURORA_SDL3_TARGET}
   )
 
   aurora_copy_runtime_dlls(gx_fifo_tests)
@@ -156,7 +156,7 @@ if (AURORA_ENABLE_GX)
     absl::flat_hash_map
     dawn::webgpu_dawn
     Tracy::TracyClient
-    ${AURORA_SDL_TARGET}
+    ${AURORA_SDL3_TARGET}
   )
   aurora_copy_runtime_dlls(gx_texture_cache_tests)
   gtest_discover_tests(gx_texture_cache_tests)
@@ -193,7 +193,7 @@ if (AURORA_ENABLE_GX)
     gtest
     gtest_main
     Tracy::TracyClient
-    ${AURORA_SDL_TARGET}
+    ${AURORA_SDL3_TARGET}
   )
   gtest_discover_tests(render_worker_tests)
 

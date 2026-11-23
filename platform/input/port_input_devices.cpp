@@ -25,15 +25,15 @@
 #include "MetroidPrime/Player/CGameState.hpp"
 #include "MetroidPrime/Player/CPlayerState.hpp"
 
-#include <SDL2/SDL_events.h>
-#include <SDL2/SDL_gamecontroller.h>
-#include <SDL2/SDL_joystick.h>
-#include <SDL2/SDL_keyboard.h>
-#include <SDL2/SDL_mouse.h>
-#include <SDL2/SDL_sensor.h>
-#include <SDL2/SDL_timer.h>
-#include <SDL2/SDL_touch.h>
-#include <SDL2/SDL_video.h>
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_gamepad.h>
+#include <SDL3/SDL_joystick.h>
+#include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_sensor.h>
+#include <SDL3/SDL_timer.h>
+#include <SDL3/SDL_touch.h>
+#include <SDL3/SDL_video.h>
 
 #include <algorithm>
 #include <atomic>
@@ -50,47 +50,6 @@
 
 namespace PortInputDevices {
 namespace {
-
-uint64_t NowNs() {
-  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                   std::chrono::steady_clock::now().time_since_epoch())
-                                   .count());
-}
-
-bool HasGameController() {
-  for (int index = 0; index < SDL_NumJoysticks(); ++index) {
-    if (SDL_IsGameController(index) == SDL_TRUE) return true;
-  }
-  return false;
-}
-
-bool IsVirtualController(SDL_GameController* controller) {
-  SDL_Joystick* joystick = SDL_GameControllerGetJoystick(controller);
-  if (joystick == nullptr) return false;
-  const SDL_JoystickID instance = SDL_JoystickInstanceID(joystick);
-  for (int index = 0; index < SDL_NumJoysticks(); ++index) {
-    if (SDL_JoystickGetDeviceInstanceID(index) == instance) {
-      return SDL_JoystickIsVirtual(index) == SDL_TRUE;
-    }
-  }
-  return false;
-}
-
-const char* ControllerTypeName(SDL_GameControllerType type) {
-  switch (type) {
-  case SDL_CONTROLLER_TYPE_XBOX360: return "xbox360";
-  case SDL_CONTROLLER_TYPE_XBOXONE: return "xboxone";
-  case SDL_CONTROLLER_TYPE_PS3: return "ps3";
-  case SDL_CONTROLLER_TYPE_PS4: return "ps4";
-  case SDL_CONTROLLER_TYPE_PS5: return "ps5";
-  case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO: return "switchpro";
-  case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_LEFT: return "joyconleft";
-  case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT: return "joyconright";
-  case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_PAIR: return "joyconpair";
-  case SDL_CONTROLLER_TYPE_VIRTUAL: return "virtual";
-  default: return "unknown";
-  }
-}
 
 using PortInput::Action;
 using PortInput::Binding;
@@ -140,12 +99,12 @@ std::bitset<PortInput::kTouchCount> TouchBits(const std::atomic<uint64_t> (&word
 // by an SDL event watch on the event thread.
 std::atomic<int> sWheelMilli[2]{};
 
-int SDLCALL WheelWatch(void*, SDL_Event* event) {
-  if (event->type != SDL_MOUSEWHEEL || event->wheel.which == SDL_TOUCH_MOUSEID) return 1;
+bool SDLCALL WheelWatch(void*, SDL_Event* event) {
+  if (event->type != SDL_EVENT_MOUSE_WHEEL || event->wheel.which == SDL_TOUCH_MOUSEID) return true;
   const float flip = event->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1.f : 1.f;
   sWheelMilli[0].fetch_add(static_cast<int>(std::lround(event->wheel.y * flip * 1000.f)), std::memory_order_relaxed);
   sWheelMilli[1].fetch_add(static_cast<int>(std::lround(event->wheel.x * flip * 1000.f)), std::memory_order_relaxed);
-  return 1;
+  return true;
 }
 
 std::string ScancodeName(int scancode) {
@@ -195,12 +154,12 @@ Action PadAxisAction(PADAxis axis) {
   }
 }
 
-// A native button code (SDL_GameControllerButton or a trigger's half pull), as the raw
+// A native button code (SDL_GamepadButton or a trigger's half pull), as the raw
 // state's pad button bit; -1 for none.
 int NativeButtonCode(u32 native) {
   if (native == PAD_NATIVE_BUTTON_TRIGGER_LEFT) return PAD_RAW_BUTTON_TRIGGER_LEFT;
   if (native == PAD_NATIVE_BUTTON_TRIGGER_RIGHT) return PAD_RAW_BUTTON_TRIGGER_RIGHT;
-  if (native < SDL_CONTROLLER_BUTTON_MAX) return static_cast<int>(native);
+  if (native < SDL_GAMEPAD_BUTTON_COUNT) return static_cast<int>(native);
   return -1;
 }
 
@@ -250,9 +209,9 @@ bool TriggerAxisTaken(const PADAxisMapping* axes, u32 axisCount, const PADButton
   }
   if (m == nullptr) return false;
   u32 native = static_cast<u32>(m->nativeButton);
-  if (m->nativeAxis.nativeAxis == SDL_CONTROLLER_AXIS_TRIGGERLEFT) {
+  if (m->nativeAxis.nativeAxis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER) {
     native = PAD_NATIVE_BUTTON_TRIGGER_LEFT;
-  } else if (m->nativeAxis.nativeAxis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) {
+  } else if (m->nativeAxis.nativeAxis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
     native = PAD_NATIVE_BUTTON_TRIGGER_RIGHT;
   } else if (m->nativeAxis.nativeAxis != -1) {
     return false;
@@ -399,8 +358,8 @@ void BindBeamChords(Profile& p, u32 port = 0) {
   }
   if (!lshiftTaken && port == 0) keyShifts.push_back(Make(Device::Key, SDL_SCANCODE_LSHIFT));
   // Also with the touch overlay on: its buttons are touch inputs, so a pad played beside it keeps LB.
-  if (!PadButtonBoundBesidesL(SDL_CONTROLLER_BUTTON_LEFTSHOULDER, port)) {
-    padShifts.push_back(NativeInput(SDL_CONTROLLER_BUTTON_LEFTSHOULDER));
+  if (!PadButtonBoundBesidesL(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, port)) {
+    padShifts.push_back(NativeInput(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER));
   }
 
   // The engine's beam actions are MP1's names for MP2's slots, in the order RouteDirectActions
@@ -439,8 +398,8 @@ void BindPortControls(Profile& p) {
   // The port's own keys and the pad's overlay chord. Back + Start is ordered both
   // ways, so either can be held first; the chord also keeps Start from pausing.
   Bind(p, Action::PortMenu, Make(Device::Key, SDL_SCANCODE_F1));
-  const Input back = NativeInput(SDL_CONTROLLER_BUTTON_BACK);
-  const Input start = NativeInput(SDL_CONTROLLER_BUTTON_START);
+  const Input back = NativeInput(SDL_GAMEPAD_BUTTON_BACK);
+  const Input start = NativeInput(SDL_GAMEPAD_BUTTON_START);
   if (back.Valid() && start.Valid()) {
     for (int order = 0; order < 2; ++order) {
       Binding b;
@@ -462,8 +421,8 @@ void BindPortControls(Profile& p) {
   Bind(p, Action::NextStateSlot, Make(Device::Key, SDL_SCANCODE_F6));
   // The special menu (port_special_menu.h): F2, and both stick clicks on a pad, either first.
   Bind(p, Action::SpecialMenu, Make(Device::Key, SDL_SCANCODE_F2));
-  const Input l3 = NativeInput(SDL_CONTROLLER_BUTTON_LEFTSTICK);
-  const Input r3 = NativeInput(SDL_CONTROLLER_BUTTON_RIGHTSTICK);
+  const Input l3 = NativeInput(SDL_GAMEPAD_BUTTON_LEFT_STICK);
+  const Input r3 = NativeInput(SDL_GAMEPAD_BUTTON_RIGHT_STICK);
   if (l3.Valid() && r3.Valid()) {
     for (int order = 0; order < 2; ++order) {
       Binding b;
@@ -475,7 +434,7 @@ void BindPortControls(Profile& p) {
     }
   }
   // Gyro aim's hold / pause / toggle button (F1 > Controls, the gyro Mode row), as in MP1.
-  Bind(p, Action::GyroAim, NativeInput(SDL_CONTROLLER_BUTTON_RIGHTSTICK));
+  Bind(p, Action::GyroAim, NativeInput(SDL_GAMEPAD_BUTTON_RIGHT_STICK));
   Bind(p, Action::GyroAim, Make(Device::Key, SDL_SCANCODE_LCTRL));
 
   BindBeamChords(p);
@@ -538,13 +497,13 @@ uint32_t ReadMouseButtons(unsigned mouseHeld) {
   // button would otherwise reach the game here as A the moment the finger lands.
   const bool live = PortMouse::Enabled() && !PortMouse::UiActive() && !PortOverlay::Visible() &&
                     !(PortPointer::Enabled() && PortPointer::ScreenActive()) && window != nullptr &&
-                    SDL_GetRelativeMouseMode() == SDL_TRUE;
+                    SDL_GetWindowRelativeMouseMode(window);
   return sGate.Poll(live, mouseHeld & PortInputMap::kMouseButtonMask);
 }
 
 // SDL's mouse button state, in mouse button code order (left, middle, right, X1, X2).
 unsigned SdlMouseHeld() {
-  const Uint32 state = SDL_GetMouseState(nullptr, nullptr);
+  const SDL_MouseButtonFlags state = SDL_GetMouseState(nullptr, nullptr);
   unsigned held = 0;
   if (state & SDL_BUTTON_LMASK) held |= 1u << 0;
   if (state & SDL_BUTTON_MMASK) held |= 1u << 1;
@@ -563,10 +522,10 @@ void FillPadState(PortInput::RawState& raw, u32 port) {
     const bool useDz = dz != nullptr && dz->useDeadzones;
     const bool precise = PortOverlay::PreciseStickDeadZones();
     for (int a = 0; a < PAD_RAW_AXIS_COUNT; ++a) {
-      if (a == SDL_CONTROLLER_AXIS_TRIGGERLEFT || a == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) {
+      if (a == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || a == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
         raw.padAxes[a] = std::max(0.f, static_cast<float>(pad.axes[a]) / 32767.f);
       } else {
-        const bool left = a == SDL_CONTROLLER_AXIS_LEFTX || a == SDL_CONTROLLER_AXIS_LEFTY;
+        const bool left = a == SDL_GAMEPAD_AXIS_LEFTX || a == SDL_GAMEPAD_AXIS_LEFTY;
         raw.padAxes[a] = StickValue(pad.axes[a], dz == nullptr ? 0 : left ? dz->stickDeadZone : dz->substickDeadZone,
                                     useDz, precise);
       }
@@ -574,23 +533,23 @@ void FillPadState(PortInput::RawState& raw, u32 port) {
     // Flick stick turns by the right stick's angle: a dead zone per axis zeroes the minor axis
     // near each axis (a snap every 90 degrees while circling), so under it the dead zone is round.
     if (useDz && PortMouse::FlickStick(static_cast<int>(port))) {
-      const float x = static_cast<float>(pad.axes[SDL_CONTROLLER_AXIS_RIGHTX]);
-      const float y = static_cast<float>(pad.axes[SDL_CONTROLLER_AXIS_RIGHTY]);
+      const float x = static_cast<float>(pad.axes[SDL_GAMEPAD_AXIS_RIGHTX]);
+      const float y = static_cast<float>(pad.axes[SDL_GAMEPAD_AXIS_RIGHTY]);
       const float dzr = static_cast<float>(dz->substickDeadZone);
       const bool inside = x * x + y * y <= dzr * dzr;
       // Rescaled, the tilt runs from the round dead zone's edge (PublishFlickStick then skips it).
       const float length = std::sqrt(x * x + y * y);
       const float scale = !inside && precise ? std::min((length - dzr) / std::max(32767.f - dzr, 1.f), 1.f) / length
                                              : 1.f / 32767.f;
-      raw.padAxes[SDL_CONTROLLER_AXIS_RIGHTX] = inside ? 0.f : std::clamp(x * scale, -1.f, 1.f);
-      raw.padAxes[SDL_CONTROLLER_AXIS_RIGHTY] = inside ? 0.f : std::clamp(y * scale, -1.f, 1.f);
+      raw.padAxes[SDL_GAMEPAD_AXIS_RIGHTX] = inside ? 0.f : std::clamp(x * scale, -1.f, 1.f);
+      raw.padAxes[SDL_GAMEPAD_AXIS_RIGHTY] = inside ? 0.f : std::clamp(y * scale, -1.f, 1.f);
     }
   }
 }
 
 void FillRawState(PortInput::RawState& raw, unsigned mouseHeld, bool focused) {
   int numKeys = 0;
-  if (const Uint8* keys = SDL_GetKeyboardState(&numKeys)) {
+  if (const bool* keys = SDL_GetKeyboardState(&numKeys)) {
     for (int i = 0; i < numKeys && i < PortInput::kKeyCount; ++i) {
       if (keys[i]) raw.keys.set(static_cast<size_t>(i));
     }
@@ -604,10 +563,10 @@ void FillRawState(PortInput::RawState& raw, unsigned mouseHeld, bool focused) {
   const int radialPad = PortRadial::SimulatedPad(simulated);
   if (radialPad >= 0) {
     if (radialPad < 2)
-      raw.padButtons |= 1u << (radialPad == PortRadial::kBeam ? SDL_CONTROLLER_BUTTON_RIGHTSTICK :
-                                                              SDL_CONTROLLER_BUTTON_LEFTSTICK);
-    raw.padAxes[SDL_CONTROLLER_AXIS_RIGHTX] = simulated.x;
-    raw.padAxes[SDL_CONTROLLER_AXIS_RIGHTY] = -simulated.y;
+      raw.padButtons |= 1u << (radialPad == PortRadial::kBeam ? SDL_GAMEPAD_BUTTON_RIGHT_STICK :
+                                                              SDL_GAMEPAD_BUTTON_LEFT_STICK);
+    raw.padAxes[SDL_GAMEPAD_AXIS_RIGHTX] = simulated.x;
+    raw.padAxes[SDL_GAMEPAD_AXIS_RIGHTY] = -simulated.y;
   }
   uint32_t mouse = 0;
   // Plain "mouse:left" bindings read SDL's buttons as they are, so a click on F1 or any other
@@ -645,10 +604,7 @@ void FillRawState(PortInput::RawState& raw, unsigned mouseHeld, bool focused) {
   // up to one, and extra notches in one poll are dropped. Scrolling over the F1
   // overlay or an unfocused window is dropped too.
   static bool sWheelWatch = false;
-  if (!sWheelWatch) {
-    SDL_AddEventWatch(WheelWatch, nullptr);
-    sWheelWatch = true;
-  }
+  if (!sWheelWatch) sWheelWatch = SDL_AddEventWatch(WheelWatch, nullptr);
   const bool wheelLive = focused && !PortOverlay::Visible();
   for (int i = 0; i < 2; ++i) {
     const int milli = sWheelMilli[i].exchange(0, std::memory_order_relaxed);
@@ -783,7 +739,7 @@ int CycleTarget(bool beam, int dir, int player = 0) {
 // `beam` picks which; `target` -1 just keeps the pending one alive. Only Player 1 has the radial.
 void PushCyclePick(bool beam, int target, bool radial = false, int player = 0) {
   CyclePending& p = sCyclePending[player][beam];
-  const uint64_t now = NowNs();
+  const uint64_t now = SDL_GetTicksNS();
   if (target >= 0) {
     p.Start(target, radial, now);
   }
@@ -906,13 +862,13 @@ bool IsPortAction(Action a) {
 // tap can begin and end between two frames, so the key state alone misses it.
 std::atomic<uint64_t> sKeyDowns[(PortInput::kKeyCount + 63) / 64]{};
 
-int SDLCALL KeyDownWatch(void*, SDL_Event* event) {
-  if (event->type != SDL_KEYDOWN || event->key.repeat) return 1;
-  const int code = static_cast<int>(event->key.keysym.scancode);
+bool SDLCALL KeyDownWatch(void*, SDL_Event* event) {
+  if (event->type != SDL_EVENT_KEY_DOWN || event->key.repeat) return true;
+  const int code = static_cast<int>(event->key.scancode);
   if (code >= 0 && code < PortInput::kKeyCount) {
     sKeyDowns[code / 64].fetch_or(uint64_t{1} << (code % 64), std::memory_order_relaxed);
   }
-  return 1;
+  return true;
 }
 
 // A digital L/R reads as 180 the way Aurora's controller path sets it; a fully pulled analog (a
@@ -1101,13 +1057,13 @@ bool ActivePad(std::string& guid, std::string& type, std::string& name, int port
   type.clear();
   name.clear();
   const s32 index = PADGetIndexForPort(static_cast<u32>(port));
-  SDL_GameController* pad = index >= 0 ? PADGetSDLGamepadForIndex(static_cast<u32>(index)) : nullptr;
+  SDL_Gamepad* pad = index >= 0 ? PADGetSDLGamepadForIndex(static_cast<u32>(index)) : nullptr;
   if (pad == nullptr) return false;
   char buf[33] = {};
-  SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(SDL_GameControllerGetJoystick(pad)), buf, sizeof(buf));
+  SDL_GUIDToString(SDL_GetJoystickGUID(SDL_GetGamepadJoystick(pad)), buf, sizeof(buf));
   guid = buf;
-  type = ControllerTypeName(SDL_GameControllerGetType(pad));
-  if (const char* n = SDL_GameControllerName(pad)) name = n;
+  if (const char* t = SDL_GetGamepadStringForType(SDL_GetGamepadType(pad))) type = t;
+  if (const char* n = SDL_GetGamepadName(pad)) name = n;
   return true;
 }
 
@@ -1136,7 +1092,7 @@ void ReadRaw(PortInput::RawState& raw, int port) {
     return;
   }
   int numKeys = 0;
-  if (const Uint8* keys = SDL_GetKeyboardState(&numKeys)) {
+  if (const bool* keys = SDL_GetKeyboardState(&numKeys)) {
     for (int i = 0; i < numKeys && i < PortInput::kKeyCount; ++i) {
       if (keys[i]) raw.keys.set(static_cast<size_t>(i));
     }
@@ -1156,19 +1112,19 @@ void ReadRaw(PortInput::RawState& raw, int port) {
 
 std::vector<SPadInfo> ConnectedPads() {
   std::vector<SPadInfo> pads;
-  for (int index = 0; index < SDL_NumJoysticks(); ++index) {
-    if (SDL_IsGameController(index) != SDL_TRUE || SDL_JoystickIsVirtual(index) == SDL_TRUE) continue;
-    SDL_GameController* pad = SDL_GameControllerOpen(index);
-    if (pad == nullptr) continue;
+  int count = 0;
+  SDL_JoystickID* ids = SDL_GetGamepads(&count);
+  for (int i = 0; ids != nullptr && i < count; ++i) {
+    if (SDL_IsJoystickVirtual(ids[i])) continue;
     SPadInfo info;
     char buf[33] = {};
-    SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(SDL_GameControllerGetJoystick(pad)), buf, sizeof(buf));
+    SDL_GUIDToString(SDL_GetJoystickGUIDForID(ids[i]), buf, sizeof(buf));
     info.guid = buf;
-    info.type = ControllerTypeName(SDL_GameControllerGetType(pad));
-    if (const char* n = SDL_GameControllerName(pad)) info.name = n;
-    SDL_GameControllerClose(pad);
+    if (const char* t = SDL_GetGamepadStringForType(SDL_GetGamepadTypeForID(ids[i]))) info.type = t;
+    if (const char* n = SDL_GetGamepadNameForID(ids[i])) info.name = n;
     pads.push_back(std::move(info));
   }
+  SDL_free(ids);
   return pads;
 }
 
@@ -1209,7 +1165,7 @@ static void KeepPortMenuReachable(Profile& p) {
     if (family == PortInput::Family::Keyboard) return;
     pad = pad || family == PortInput::Family::Pad;
   }
-  if (pad && HasGameController()) return;
+  if (pad && SDL_HasGamepad()) return;
   Bind(p, Action::PortMenu, Make(Device::Key, SDL_SCANCODE_F1));
 }
 
@@ -1269,10 +1225,10 @@ static const SMenuAction* FindMenuAction(Action a, bool menu) {
 }
 
 // A port's pad, unless it's missing or the touch overlay's virtual one.
-static SDL_GameController* RealPad(u32 port) {
+static SDL_Gamepad* RealPad(u32 port) {
   const s32 index = PADGetIndexForPort(port);
-  SDL_GameController* pad = index >= 0 ? PADGetSDLGamepadForIndex(static_cast<u32>(index)) : nullptr;
-  return pad == nullptr || IsVirtualController(pad) ? nullptr : pad;
+  SDL_Gamepad* pad = index >= 0 ? PADGetSDLGamepadForIndex(static_cast<u32>(index)) : nullptr;
+  return pad == nullptr || SDL_IsJoystickVirtual(SDL_GetGamepadID(pad)) ? nullptr : pad;
 }
 
 // The Menu rows' defaults: the pad type's standard mapping (A confirms, B backs
@@ -1281,18 +1237,18 @@ static SDL_GameController* RealPad(u32 port) {
 // Without a pad, the standard pad's, so a remap page shows what one would get.
 static void BindMenuDefaults(Profile& p, u32 port) {
   PADDefaultMapping def;
-  SDL_GameController* pad = RealPad(port);
+  SDL_Gamepad* pad = RealPad(port);
   PADGetDefaultMapping(&def, pad != nullptr ? PADGetControllerType(port) : PAD_TYPE_STANDARD);
   if (pad != nullptr) {
     for (PADButtonMapping& m : def.buttons) {
-      if (m.nativeButton < SDL_CONTROLLER_BUTTON_MAX &&
-          !SDL_GameControllerHasButton(pad, static_cast<SDL_GameControllerButton>(m.nativeButton))) {
+      if (m.nativeButton < SDL_GAMEPAD_BUTTON_COUNT &&
+          !SDL_GamepadHasButton(pad, static_cast<SDL_GamepadButton>(m.nativeButton))) {
         m.nativeButton = PAD_NATIVE_BUTTON_INVALID;
       }
     }
     for (PADAxisMapping& m : def.axes) {
-      if (m.nativeAxis.nativeAxis >= 0 && m.nativeAxis.nativeAxis < SDL_CONTROLLER_AXIS_MAX &&
-          !SDL_GameControllerHasAxis(pad, static_cast<SDL_GameControllerAxis>(m.nativeAxis.nativeAxis))) {
+      if (m.nativeAxis.nativeAxis >= 0 && m.nativeAxis.nativeAxis < SDL_GAMEPAD_AXIS_COUNT &&
+          !SDL_GamepadHasAxis(pad, static_cast<SDL_GamepadAxis>(m.nativeAxis.nativeAxis))) {
         m.nativeAxis.nativeAxis = -1;
         m.nativeButton = PAD_NATIVE_BUTTON_INVALID;
       }
@@ -1369,7 +1325,7 @@ static void ApplyMenuButtons(Profile& p, int port = 0) {
 // A single pad input as the native button the prompts look up, or invalid.
 static u32 PromptNative(const Input& in) {
   if (in.device == Device::PadButton) {
-    if (in.code < SDL_CONTROLLER_BUTTON_MAX) return in.code;
+    if (in.code < SDL_GAMEPAD_BUTTON_COUNT) return in.code;
     if (in.code == PAD_RAW_BUTTON_TRIGGER_LEFT || in.code == PAD_RAW_BUTTON_TRIGGER_LEFT_CLICK) {
       return PAD_NATIVE_BUTTON_TRIGGER_LEFT;
     }
@@ -1377,8 +1333,8 @@ static u32 PromptNative(const Input& in) {
       return PAD_NATIVE_BUTTON_TRIGGER_RIGHT;
     }
   } else if (in.device == Device::PadAxis && in.dir >= 0) {
-    if (in.code == SDL_CONTROLLER_AXIS_TRIGGERLEFT) return PAD_NATIVE_BUTTON_TRIGGER_LEFT;
-    if (in.code == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) return PAD_NATIVE_BUTTON_TRIGGER_RIGHT;
+    if (in.code == SDL_GAMEPAD_AXIS_LEFT_TRIGGER) return PAD_NATIVE_BUTTON_TRIGGER_LEFT;
+    if (in.code == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) return PAD_NATIVE_BUTTON_TRIGGER_RIGHT;
   }
   return PAD_NATIVE_BUTTON_INVALID;
 }
@@ -1423,7 +1379,7 @@ static uint16_t PromptGameContexts() {
 // beside LB), else its first binding.
 static bool PromptInputFor(std::initializer_list<Action> actions, PortInput::Family family, Input& out) {
   const auto face = [](const Input& in) {
-    return in.device == Device::PadButton && in.code >= SDL_CONTROLLER_BUTTON_A && in.code <= SDL_CONTROLLER_BUTTON_Y;
+    return in.device == Device::PadButton && in.code >= SDL_GAMEPAD_BUTTON_SOUTH && in.code <= SDL_GAMEPAD_BUTTON_NORTH;
   };
   const uint16_t contexts = PromptGameContexts();
   std::lock_guard lock(sPromptMutex);
@@ -1540,17 +1496,22 @@ PADStatus Synthesize(const PortInput::Output& out) { return SynthesizeStatus(out
 
 // Aurora's extended buttons, which have no engine action (nothing in the game reads them).
 static void AddExtButtons(PADStatus& status, uint32_t padButtons) {
-  static constexpr std::pair<SDL_GameControllerButton, PADExtButton> kExt[] = {
-      {SDL_CONTROLLER_BUTTON_BACK, PAD_BUTTON_BACK},
-      {SDL_CONTROLLER_BUTTON_GUIDE, PAD_BUTTON_GUIDE},
-      {SDL_CONTROLLER_BUTTON_MISC1, PAD_BUTTON_MISC1},
-      {SDL_CONTROLLER_BUTTON_PADDLE2, PAD_BUTTON_RIGHT_PADDLE1},
-      {SDL_CONTROLLER_BUTTON_PADDLE1, PAD_BUTTON_LEFT_PADDLE1},
-      {SDL_CONTROLLER_BUTTON_PADDLE4, PAD_BUTTON_RIGHT_PADDLE2},
-      {SDL_CONTROLLER_BUTTON_PADDLE3, PAD_BUTTON_LEFT_PADDLE2},
-      {SDL_CONTROLLER_BUTTON_RIGHTSTICK, PAD_BUTTON_RIGHT_STICK},
-      {SDL_CONTROLLER_BUTTON_LEFTSTICK, PAD_BUTTON_LEFT_STICK},
-      {SDL_CONTROLLER_BUTTON_TOUCHPAD, PAD_BUTTON_TOUCHPAD},
+  static constexpr std::pair<SDL_GamepadButton, PADExtButton> kExt[] = {
+      {SDL_GAMEPAD_BUTTON_BACK, PAD_BUTTON_BACK},
+      {SDL_GAMEPAD_BUTTON_GUIDE, PAD_BUTTON_GUIDE},
+      {SDL_GAMEPAD_BUTTON_MISC1, PAD_BUTTON_MISC1},
+      {SDL_GAMEPAD_BUTTON_MISC2, PAD_BUTTON_MISC2},
+      {SDL_GAMEPAD_BUTTON_MISC3, PAD_BUTTON_MISC3},
+      {SDL_GAMEPAD_BUTTON_MISC4, PAD_BUTTON_MISC4},
+      {SDL_GAMEPAD_BUTTON_MISC5, PAD_BUTTON_MISC5},
+      {SDL_GAMEPAD_BUTTON_MISC6, PAD_BUTTON_MISC6},
+      {SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1, PAD_BUTTON_RIGHT_PADDLE1},
+      {SDL_GAMEPAD_BUTTON_LEFT_PADDLE1, PAD_BUTTON_LEFT_PADDLE1},
+      {SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2, PAD_BUTTON_RIGHT_PADDLE2},
+      {SDL_GAMEPAD_BUTTON_LEFT_PADDLE2, PAD_BUTTON_LEFT_PADDLE2},
+      {SDL_GAMEPAD_BUTTON_RIGHT_STICK, PAD_BUTTON_RIGHT_STICK},
+      {SDL_GAMEPAD_BUTTON_LEFT_STICK, PAD_BUTTON_LEFT_STICK},
+      {SDL_GAMEPAD_BUTTON_TOUCHPAD, PAD_BUTTON_TOUCHPAD},
   };
   for (const auto& [native, button] : kExt) {
     if ((padButtons >> native) & 1u) status.extButton |= button;
@@ -1562,7 +1523,7 @@ static void AddExtButtons(PADStatus& status, uint32_t padButtons) {
 // is the Spider Ball, the controller's R trigger stops pressing R and pulling the R analog. Free
 // look on any other input (the presets' right stick click, a key) stays.
 static bool RightTrigger(const Input& in) {
-  if (in.device == Device::PadAxis) return in.code == SDL_CONTROLLER_AXIS_TRIGGERRIGHT;
+  if (in.device == Device::PadAxis) return in.code == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
   return in.device == Device::PadButton &&
          (in.code == PAD_RAW_BUTTON_TRIGGER_RIGHT || in.code == PAD_RAW_BUTTON_TRIGGER_RIGHT_CLICK);
 }
@@ -1752,8 +1713,7 @@ bool PollPlayer(int port, PADStatus& status) {
 }
 
 PADStatus Poll() {
-  SDL_Window* window = SDL_GetWindowFromID(1);
-  const bool focused = window != nullptr && (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+  const bool focused = SDL_GetKeyboardFocus() != nullptr || SDL_GetMouseFocus() != nullptr;
   return Poll(SdlMouseHeld(), focused).status;
 }
 
@@ -1763,10 +1723,7 @@ void PollPortActions() {
   static PortInput::Runtime sRuntime;
   static bool sInit = false;
   static bool sWatch = false;
-  if (!sWatch) {
-    SDL_AddEventWatch(KeyDownWatch, nullptr);
-    sWatch = true;
-  }
+  if (!sWatch) sWatch = SDL_AddEventWatch(KeyDownWatch, nullptr);
 
   Profile next;
   BuildProfile(next);
@@ -1793,7 +1750,7 @@ void PollPortActions() {
   // F12 (the Screenshot default) and F1 (the Port menu's) have no other handler: Aurora's own F12
   // capture went with the 2026-10-23 re-vendor, as in MP1.
   const uint16_t contexts = GameContexts();
-  const PortInput::Output& out = sRuntime.Poll(raw, contexts, static_cast<double>(NowNs()) / 1e6, 0);
+  const PortInput::Output& out = sRuntime.Poll(raw, contexts, static_cast<double>(SDL_GetTicksNS()) / 1e6, 0);
   // The F1 Controls page is recording an input: a bound PortMenu would close it.
   if (PortInputRemap::Capturing()) {
     SetGyroButton(false);
@@ -1953,20 +1910,20 @@ bool ReadGyroRates(int port, const GyroSettings& cfg, float& pitch, float& yaw, 
   if (wantController) {
     // The player's pad: whichever controller Aurora has on this port, not the first one opened.
     const s32 padIndex = PADGetIndexForPort(static_cast<u32>(port));
-    if (SDL_GameController* pad = padIndex >= 0 ? PADGetSDLGamepadForIndex(static_cast<u32>(padIndex)) : nullptr) {
-      if (SDL_GameControllerHasSensor(pad, SDL_SENSOR_GYRO)) {
+    if (SDL_Gamepad* pad = padIndex >= 0 ? PADGetSDLGamepadForIndex(static_cast<u32>(padIndex)) : nullptr) {
+      if (SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO)) {
         // Asked per pad, so a reconnected or swapped pad gets its sensors on too.
-        if (SDL_GameControllerIsSensorEnabled(pad, SDL_SENSOR_GYRO) != SDL_TRUE) {
-          SDL_GameControllerSetSensorEnabled(pad, SDL_SENSOR_GYRO, SDL_TRUE);
+        if (!SDL_GamepadSensorEnabled(pad, SDL_SENSOR_GYRO)) {
+          SDL_SetGamepadSensorEnabled(pad, SDL_SENSOR_GYRO, true);
         }
-        if (SDL_GameControllerGetSensorData(pad, SDL_SENSOR_GYRO, gyro, 3) == 0) {
-          source = static_cast<uint32_t>(SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad)));
+        if (SDL_GetGamepadSensorData(pad, SDL_SENSOR_GYRO, gyro, 3)) {
+          source = static_cast<uint32_t>(SDL_GetGamepadID(pad));
           st.status = "controller";
-          if (SDL_GameControllerHasSensor(pad, SDL_SENSOR_ACCEL)) {
-            if (SDL_GameControllerIsSensorEnabled(pad, SDL_SENSOR_ACCEL) != SDL_TRUE) {
-              SDL_GameControllerSetSensorEnabled(pad, SDL_SENSOR_ACCEL, SDL_TRUE);
+          if (SDL_GamepadHasSensor(pad, SDL_SENSOR_ACCEL)) {
+            if (!SDL_GamepadSensorEnabled(pad, SDL_SENSOR_ACCEL)) {
+              SDL_SetGamepadSensorEnabled(pad, SDL_SENSOR_ACCEL, true);
             }
-            haveAccel = SDL_GameControllerGetSensorData(pad, SDL_SENSOR_ACCEL, accel, 3) == 0;
+            haveAccel = SDL_GetGamepadSensorData(pad, SDL_SENSOR_ACCEL, accel, 3);
           }
         }
       }
@@ -1983,29 +1940,33 @@ bool ReadGyroRates(int port, const GyroSettings& cfg, float& pitch, float& yaw, 
   }
 
   if (source == 0 && wantPhone) {
-    const uint64_t searchNow = NowNs();
+    const uint64_t searchNow = SDL_GetTicksNS();
     if (sPhoneGyro == nullptr && searchNow >= sPhoneNextSearchNs) {
       sPhoneNextSearchNs = searchNow + 1000000000ull;
-      const int count = SDL_NumSensors();
-      for (int index = 0; index < count; ++index) {
-        const SDL_SensorType type = SDL_SensorGetDeviceType(index);
-        if (type == SDL_SENSOR_GYRO && sPhoneGyro == nullptr) {
-          sPhoneGyro = SDL_SensorOpen(index);
-        } else if (type == SDL_SENSOR_ACCEL && sPhoneAccel == nullptr) {
-          sPhoneAccel = SDL_SensorOpen(index);
+      int count = 0;
+      if (SDL_SensorID* ids = SDL_GetSensors(&count)) {
+        for (int i = 0; i < count; ++i) {
+          const SDL_SensorType type = SDL_GetSensorTypeForID(ids[i]);
+          if (type == SDL_SENSOR_GYRO && sPhoneGyro == nullptr) {
+            sPhoneGyro = SDL_OpenSensor(ids[i]);
+          } else if (type == SDL_SENSOR_ACCEL && sPhoneAccel == nullptr) {
+            sPhoneAccel = SDL_OpenSensor(ids[i]);
+          }
         }
+        SDL_free(ids);
       }
     }
-    if (sPhoneGyro != nullptr && SDL_SensorGetData(sPhoneGyro, gyro, 3) == 0) {
+    if (sPhoneGyro != nullptr && SDL_GetSensorData(sPhoneGyro, gyro, 3)) {
       source = kPhoneSource;
       st.status = "phone";
-      haveAccel = sPhoneAccel != nullptr && SDL_SensorGetData(sPhoneAccel, accel, 3) == 0;
+      haveAccel = sPhoneAccel != nullptr && SDL_GetSensorData(sPhoneAccel, accel, 3);
       // The phone reports its own axes (x right, y up in its natural orientation), so turn them
       // to the screen's, as SDL does for its accelerometer: landscape would otherwise swap pitch
       // and yaw. Then it is held like a pad.
-      SDL_Window* window = SDL_GetWindowFromID(1);
-      const int display = window != nullptr ? SDL_GetWindowDisplayIndex(window) : 0;
-      const int quarters = OrientationQuarters(SDL_GetDisplayOrientation(display));
+      const SDL_DisplayID display = SDL_GetPrimaryDisplay();
+      const int quarters = (OrientationQuarters(SDL_GetCurrentDisplayOrientation(display)) -
+                            OrientationQuarters(SDL_GetNaturalDisplayOrientation(display)) + 4) %
+                           4;
       const auto turn = [quarters](float v[3]) {
         const float x = v[0];
         const float y = v[1];
@@ -2053,7 +2014,7 @@ bool ReadGyroRates(int port, const GyroSettings& cfg, float& pitch, float& yaw, 
 }
 
 void FireRecalibration() {
-  const uint64_t now = NowNs();
+  const uint64_t now = SDL_GetTicksNS();
   if (sRecalibrateAtNs != 0 && now >= sRecalibrateAtNs) {
     sRecalibrateAtNs = 0;
     sGyro[0].motion.BeginManualCalibration();
@@ -2074,7 +2035,7 @@ void SetGyroButton(bool held) {
 void StartGyroRecalibration() {
   sGyro[0].motion.EndManualCalibration();
   sManualCalibrationEndNs = 0;
-  sRecalibrateAtNs = NowNs() + uint64_t(kRecalibrateSeconds * 1e9);
+  sRecalibrateAtNs = SDL_GetTicksNS() + uint64_t(kRecalibrateSeconds * 1e9);
 }
 
 void CancelGyroRecalibration() { sRecalibrateAtNs = 0; }
@@ -2084,7 +2045,7 @@ float GyroRecalibrationCountdown() {
   if (sRecalibrateAtNs == 0) {
     return -1.f;
   }
-  return float(double(sRecalibrateAtNs - NowNs()) * 1e-9);
+  return float(double(sRecalibrateAtNs - SDL_GetTicksNS()) * 1e-9);
 }
 
 float GyroManualCalibrationProgress() {
@@ -2092,7 +2053,7 @@ float GyroManualCalibrationProgress() {
   if (sManualCalibrationEndNs == 0 || !sGyro[0].motion.ManualCalibrating()) {
     return -1.f;
   }
-  const double left = double(sManualCalibrationEndNs - NowNs()) * 1e-9;
+  const double left = double(sManualCalibrationEndNs - SDL_GetTicksNS()) * 1e-9;
   return std::clamp(static_cast<float>(1.0 - left / kManualCalibrationSeconds), 0.f, 1.f);
 }
 
@@ -2182,8 +2143,8 @@ void PollGyroPort(int port, uint64_t nowNs) {
   if (port != 0) {
     bool held = false;
     const s32 padIndex = PADGetIndexForPort(static_cast<u32>(port));
-    if (SDL_GameController* pad = padIndex >= 0 ? PADGetSDLGamepadForIndex(static_cast<u32>(padIndex)) : nullptr) {
-      held = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_RIGHTSTICK);
+    if (SDL_Gamepad* pad = padIndex >= 0 ? PADGetSDLGamepadForIndex(static_cast<u32>(padIndex)) : nullptr) {
+      held = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
     }
     st.activation.Update(cfg.mode, held);
   }
@@ -2210,7 +2171,7 @@ void PollGyroPort(int port, uint64_t nowNs) {
 
 void PollGyro() {
   FireRecalibration();
-  const uint64_t nowNs = NowNs();
+  const uint64_t nowNs = SDL_GetTicksNS();
   const int players = GyroPlayers();
   for (int port = 0; port < kGyroPorts; ++port) {
     if (port < players) {

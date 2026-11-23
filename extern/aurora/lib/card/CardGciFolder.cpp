@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstring>
 
+#include <SDL3/SDL_filesystem.h>
+
 #include <filesystem>
 #include "../io.hpp"
 
@@ -196,12 +198,9 @@ ECardResult CardGciFolder::deleteFile(uint32_t fileno) {
     return ECardResult::NOFILE;
   }
   const auto deletedPath = m_folderPath / "_deleted";
-  std::error_code ec;
-  if (!io::create_directories(deletedPath)) {
-    return ECardResult::IOERROR;
-  }
-  std::filesystem::rename(m_folderPath / file->filename, deletedPath / file->filename, ec);
-  if (ec) {
+  const auto source = io::fs_path_to_string(m_folderPath / file->filename);
+  const auto destination = io::fs_path_to_string(deletedPath / file->filename);
+  if (!io::create_directories(deletedPath) || !SDL_RenamePath(source.c_str(), destination.c_str())) {
     return ECardResult::IOERROR;
   }
   file->opened = false;
@@ -247,8 +246,9 @@ ECardResult CardGciFolder::renameFile(const char* oldName, const char* newName) 
   std::error_code ec;
   const auto diskName = unused_disk_name(newName, ec);
   if (!ec) {
-    std::filesystem::rename(m_folderPath / file.filename, m_folderPath / diskName, ec);
-    if (!ec) {
+    const auto source = io::fs_path_to_string(m_folderPath / file.filename);
+    const auto destination = io::fs_path_to_string(m_folderPath / diskName);
+    if (SDL_RenamePath(source.c_str(), destination.c_str())) {
       file.filename = diskName.u8string();
     }
   }

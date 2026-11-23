@@ -8,7 +8,7 @@
 #include "port_mods.h"
 #include "port_savestate.h"
 
-#include <SDL2/SDL_misc.h>
+#include <SDL3/SDL_misc.h>
 #include <imgui.h>
 
 #include <algorithm>

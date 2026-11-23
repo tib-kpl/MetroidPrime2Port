@@ -32,6 +32,10 @@ def cmakeArguments = [
     "-DAURORA_SDL3_LINKAGE=static",
     "-DAURORA_DAWN_PROVIDER=vendor",
     "-DAURORA_DAWN_LINKAGE=static",
+    // Dawn adds a C++20 module target when the compiler supports modules; the SDK's Ninja (1.10) cannot scan
+    // them and nothing here imports it.
+    "-DCMAKE_CXX_SCAN_FOR_MODULES=OFF",
+    "-DDAWN_SUPPORTS_CXX_MODULES=OFF",
     "-DAURORA_NOD_PROVIDER=vendor",
     "-DAURORA_NOD_LINKAGE=static",
 ]

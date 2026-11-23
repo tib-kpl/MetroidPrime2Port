@@ -7,7 +7,7 @@
 #include "port_env.h"
 #include "port_strings.h"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <imgui.h>
 #include <imgui_internal.h>
 

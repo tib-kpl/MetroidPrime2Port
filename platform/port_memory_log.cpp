@@ -24,7 +24,7 @@
 #endif
 
 #if defined(__ANDROID__)
-#include <SDL2/SDL_system.h>
+#include <SDL3/SDL_system.h>
 #include <jni.h>
 
 #include <string>

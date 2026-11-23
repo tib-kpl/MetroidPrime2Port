@@ -16,12 +16,12 @@
 #include <dolphin/pad.h>
 #include <imgui.h>
 
-#include <SDL2/SDL_gamecontroller.h>
-#include <SDL2/SDL_joystick.h>
-#include <SDL2/SDL_keyboard.h>
-#include <SDL2/SDL_mouse.h>
-#include <SDL2/SDL_scancode.h>
-#include <SDL2/SDL_timer.h>
+#include <SDL3/SDL_gamepad.h>
+#include <SDL3/SDL_joystick.h>
+#include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_scancode.h>
+#include <SDL3/SDL_timer.h>
 
 #include <algorithm>
 #include <atomic>
@@ -83,14 +83,14 @@ enum class EPadPreset { kGameCube, kRemastered, kModern, kSouthpaw };
 
 s32 OtherStick(s32 axis) {
   switch (axis) {
-  case SDL_CONTROLLER_AXIS_LEFTX:
-    return SDL_CONTROLLER_AXIS_RIGHTX;
-  case SDL_CONTROLLER_AXIS_LEFTY:
-    return SDL_CONTROLLER_AXIS_RIGHTY;
-  case SDL_CONTROLLER_AXIS_RIGHTX:
-    return SDL_CONTROLLER_AXIS_LEFTX;
-  case SDL_CONTROLLER_AXIS_RIGHTY:
-    return SDL_CONTROLLER_AXIS_LEFTY;
+  case SDL_GAMEPAD_AXIS_LEFTX:
+    return SDL_GAMEPAD_AXIS_RIGHTX;
+  case SDL_GAMEPAD_AXIS_LEFTY:
+    return SDL_GAMEPAD_AXIS_RIGHTY;
+  case SDL_GAMEPAD_AXIS_RIGHTX:
+    return SDL_GAMEPAD_AXIS_LEFTX;
+  case SDL_GAMEPAD_AXIS_RIGHTY:
+    return SDL_GAMEPAD_AXIS_LEFTY;
   default:
     return axis;
   }
@@ -125,16 +125,16 @@ void ApplyPresetMapping(EPadPreset preset, PADButtonMapping* buttons, u32 button
     // Spring Ball: port_input_remap_ui's ApplyRemasteredRows).
     const PADButtonMapping mappings[] = {
         {PAD_NATIVE_BUTTON_TRIGGER_RIGHT, PAD_BUTTON_A},
-        {SDL_CONTROLLER_BUTTON_A, PAD_BUTTON_B},
-        {SDL_CONTROLLER_BUTTON_X, PAD_BUTTON_X},
-        {SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, PAD_BUTTON_Y},
-        {SDL_CONTROLLER_BUTTON_BACK, PAD_TRIGGER_Z},
-        {SDL_CONTROLLER_BUTTON_RIGHTSTICK, PAD_TRIGGER_R},
+        {SDL_GAMEPAD_BUTTON_SOUTH, PAD_BUTTON_B},
+        {SDL_GAMEPAD_BUTTON_WEST, PAD_BUTTON_X},
+        {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, PAD_BUTTON_Y},
+        {SDL_GAMEPAD_BUTTON_BACK, PAD_TRIGGER_Z},
+        {SDL_GAMEPAD_BUTTON_RIGHT_STICK, PAD_TRIGGER_R},
     };
     for (const PADButtonMapping& mapping : mappings) {
       SetButton(buttons, buttonCount, mapping);
     }
-    SetAxis(axes, axisCount, {{-1, AXIS_SIGN_POSITIVE}, SDL_CONTROLLER_BUTTON_RIGHTSTICK, PAD_AXIS_TRIGGER_R});
+    SetAxis(axes, axisCount, {{-1, AXIS_SIGN_POSITIVE}, SDL_GAMEPAD_BUTTON_RIGHT_STICK, PAD_AXIS_TRIGGER_R});
     break;
   }
   case EPadPreset::kModern: {
@@ -143,16 +143,16 @@ void ApplyPresetMapping(EPadPreset preset, PADButtonMapping* buttons, u32 button
     // R analog so RT doesn't press R as well.
     const PADButtonMapping mappings[] = {
         {PAD_NATIVE_BUTTON_TRIGGER_RIGHT, PAD_BUTTON_A},
-        {SDL_CONTROLLER_BUTTON_A, PAD_BUTTON_B},
-        {SDL_CONTROLLER_BUTTON_B, PAD_BUTTON_X},
-        {SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, PAD_BUTTON_Y},
-        {SDL_CONTROLLER_BUTTON_Y, PAD_TRIGGER_Z},
-        {SDL_CONTROLLER_BUTTON_RIGHTSTICK, PAD_TRIGGER_R},
+        {SDL_GAMEPAD_BUTTON_SOUTH, PAD_BUTTON_B},
+        {SDL_GAMEPAD_BUTTON_EAST, PAD_BUTTON_X},
+        {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, PAD_BUTTON_Y},
+        {SDL_GAMEPAD_BUTTON_NORTH, PAD_TRIGGER_Z},
+        {SDL_GAMEPAD_BUTTON_RIGHT_STICK, PAD_TRIGGER_R},
     };
     for (const PADButtonMapping& mapping : mappings) {
       SetButton(buttons, buttonCount, mapping);
     }
-    SetAxis(axes, axisCount, {{-1, AXIS_SIGN_POSITIVE}, SDL_CONTROLLER_BUTTON_RIGHTSTICK, PAD_AXIS_TRIGGER_R});
+    SetAxis(axes, axisCount, {{-1, AXIS_SIGN_POSITIVE}, SDL_GAMEPAD_BUTTON_RIGHT_STICK, PAD_AXIS_TRIGGER_R});
     break;
   }
   case EPadPreset::kSouthpaw:
@@ -165,10 +165,10 @@ void ApplyPresetMapping(EPadPreset preset, PADButtonMapping* buttons, u32 button
 
 // The controller on `port`, unless there is none or it is a virtual one (the touch
 // overlay's or a vpad: Aurora keeps no mappings for those).
-SDL_GameController* PhysicalPad(u32 port) {
+SDL_Gamepad* PhysicalPad(u32 port) {
   const s32 index = PADGetIndexForPort(port);
-  SDL_GameController* pad = index >= 0 ? PADGetSDLGamepadForIndex(static_cast< u32 >(index)) : nullptr;
-  return pad == nullptr || SDL_JoystickIsVirtual(SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad))) ? nullptr : pad;
+  SDL_Gamepad* pad = index >= 0 ? PADGetSDLGamepadForIndex(static_cast< u32 >(index)) : nullptr;
+  return pad == nullptr || SDL_IsJoystickVirtual(SDL_GetGamepadID(pad)) ? nullptr : pad;
 }
 
 // The controller on `port` back to its type's defaults with the preset on top.
@@ -444,8 +444,8 @@ SPadPortInfo PadPortInfo(unsigned port) {
   if (index < 0) return info;
   const char* name = PADGetNameForControllerIndex(static_cast<u32>(index));
   info.name = name != nullptr ? name : "Unknown controller";
-  SDL_GameController* pad = PADGetSDLGamepadForIndex(static_cast<u32>(index));
-  info.state = pad != nullptr && SDL_JoystickIsVirtual(SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad))) ? EPadPortState::kVirtual
+  SDL_Gamepad* pad = PADGetSDLGamepadForIndex(static_cast<u32>(index));
+  info.state = pad != nullptr && SDL_IsJoystickVirtual(SDL_GetGamepadID(pad)) ? EPadPortState::kVirtual
                                                                               : EPadPortState::kReal;
   return info;
 }
@@ -469,8 +469,8 @@ void ApplySavedPadPresets() {
   // SDL joystick ids are never reused, so a reconnect counts as a new controller.
   static SDL_JoystickID sSeen[PAD_CHAN3 + 1] = {};
   for (u32 port = 0; port <= PAD_CHAN3; ++port) {
-    SDL_GameController* pad = PhysicalPad(port);
-    const SDL_JoystickID id = pad != nullptr ? SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad)) : 0;
+    SDL_Gamepad* pad = PhysicalPad(port);
+    const SDL_JoystickID id = pad != nullptr ? SDL_GetGamepadID(pad) : 0;
     if (id == sSeen[port]) continue;
     sSeen[port] = id;
     const int preset = sSavedPadPreset[port];
@@ -528,7 +528,7 @@ void DrawDeadZones(unsigned port) {
 }
 
 namespace {
-// As the Remap page labels them (Xbox names, by SDL_GameControllerButton).
+// As the Remap page labels them (Xbox names, by SDL_GamepadButton).
 std::string NativeName(u32 native) {
   static constexpr const char* kLabels[] = {
       "A",        "B",        "X",        "Y",          "Back",       "Guide",       "Start",
@@ -558,8 +558,8 @@ void SetTriggerAnalog(u32 port, PADButton button, u32 native) {
   PADAxisMapping mapping{{-1, AXIS_SIGN_POSITIVE}, static_cast< s32 >(native), axis};
   if (native == PAD_NATIVE_BUTTON_TRIGGER_LEFT || native == PAD_NATIVE_BUTTON_TRIGGER_RIGHT) {
     mapping.nativeAxis.nativeAxis =
-        native == PAD_NATIVE_BUTTON_TRIGGER_LEFT ? SDL_CONTROLLER_AXIS_TRIGGERLEFT : SDL_CONTROLLER_AXIS_TRIGGERRIGHT;
-    mapping.nativeButton = SDL_CONTROLLER_BUTTON_INVALID;
+        native == PAD_NATIVE_BUTTON_TRIGGER_LEFT ? SDL_GAMEPAD_AXIS_LEFT_TRIGGER : SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
+    mapping.nativeButton = SDL_GAMEPAD_BUTTON_INVALID;
   }
   PADSetAxisMapping(port, mapping);
 }
@@ -577,8 +577,8 @@ u32 ShownNative(u32 port, const PADButtonMapping* mapping) {
   const PADAxisMapping* axes = PADGetAxisMappings(port, &count);
   for (u32 i = 0; axes != nullptr && i < count; ++i) {
     if (axes[i].padAxis != axis) continue;
-    if (axes[i].nativeAxis.nativeAxis == SDL_CONTROLLER_AXIS_TRIGGERLEFT) return PAD_NATIVE_BUTTON_TRIGGER_LEFT;
-    if (axes[i].nativeAxis.nativeAxis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) return PAD_NATIVE_BUTTON_TRIGGER_RIGHT;
+    if (axes[i].nativeAxis.nativeAxis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER) return PAD_NATIVE_BUTTON_TRIGGER_LEFT;
+    if (axes[i].nativeAxis.nativeAxis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) return PAD_NATIVE_BUTTON_TRIGGER_RIGHT;
   }
   return PAD_NATIVE_BUTTON_INVALID;
 }
@@ -640,7 +640,7 @@ long long NativeForLabel(std::string_view label) {
   if (EqualsNoCase(label, "none")) return PAD_NATIVE_BUTTON_INVALID;
   if (EqualsNoCase(label, "lt")) return PAD_NATIVE_BUTTON_TRIGGER_LEFT;
   if (EqualsNoCase(label, "rt")) return PAD_NATIVE_BUTTON_TRIGGER_RIGHT;
-  for (u32 b = 0; b < SDL_CONTROLLER_BUTTON_MAX; ++b) {
+  for (u32 b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; ++b) {
     if (EqualsNoCase(NativeName(b), label)) return b;
   }
   if (label.empty() || label.size() > 2 ||
@@ -648,7 +648,7 @@ long long NativeForLabel(std::string_view label) {
     return -1;
   }
   const int b = std::stoi(std::string(label));
-  return b < SDL_CONTROLLER_BUTTON_MAX ? b : -1;
+  return b < SDL_GAMEPAD_BUTTON_COUNT ? b : -1;
 }
 
 } // namespace PortControls

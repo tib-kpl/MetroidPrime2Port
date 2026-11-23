@@ -3,7 +3,8 @@
 
 #include "aurora.h"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_joystick.h>
 
 #ifdef __cplusplus
 #include <cstdint>

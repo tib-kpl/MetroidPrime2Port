@@ -15,7 +15,7 @@
 #include "port_prompts.h"
 #include "port_savestate.h"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <aurora/imgui.h>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -147,21 +147,18 @@ void ClearTouchHover() {
 // status bar. SDL's also avoids the swipe-down band, which Android reports even with the bars
 // hidden, leaving a wide empty strip; the back-gesture edges at the sides stay avoided.
 static bool DrawArea(SDL_Window* window, SDL_Rect* area) {
-  if (window == nullptr || area == nullptr) {
+  if (!SDL_GetWindowSafeArea(window, area))
     return false;
-  }
-  int width = 0;
-  int height = 0;
-  SDL_GetWindowSize(window, &width, &height);
-  if (width <= 0 || height <= 0) return false;
-  *area = SDL_Rect{0, 0, width, height};
 #if defined(__ANDROID__)
   int left, top, right, bottom;
-  int pixelWidth = 0, pixelHeight = 0;
-  SDL_GL_GetDrawableSize(window, &pixelWidth, &pixelHeight);
-  if (DrawInsetsPx(left, top, right, bottom) && height > 0 && pixelHeight > 0) {
-    area->y = static_cast<int>(top * static_cast<float>(height) / static_cast<float>(pixelHeight));
-    area->h = std::max(0, height - area->y);
+  int h = 0, ph = 0;
+  if (DrawInsetsPx(left, top, right, bottom) && SDL_GetWindowSize(window, nullptr, &h) &&
+      SDL_GetWindowSizeInPixels(window, nullptr, &ph) && h > 0 && ph > 0) {
+    const int drawTop = static_cast< int >(top * static_cast< float >(h) / static_cast< float >(ph));
+    if (drawTop < area->y) {
+      area->h += area->y - drawTop;
+      area->y = drawTop;
+    }
   }
 #endif
   return true;
@@ -177,10 +174,9 @@ bool DrawPageWindow() {
   SDL_Window* window = MainWindow();
   SDL_Rect safe;
   int windowWidth = 0, windowHeight = 0;
-  if (window != nullptr && DrawArea(window, &safe)) {
-    SDL_GetWindowSize(window, &windowWidth, &windowHeight);
-  }
-  if (window != nullptr && windowWidth > 0 && windowHeight > 0 && safe.w > 0 && safe.h > 0) {
+  if (window != nullptr && DrawArea(window, &safe) &&
+      SDL_GetWindowSize(window, &windowWidth, &windowHeight) && windowWidth > 0 &&
+      windowHeight > 0 && safe.w > 0 && safe.h > 0) {
     // ImGui's display size need not be in window coordinates.
     const float sx = size.x / static_cast< float >(windowWidth);
     const float sy = size.y / static_cast< float >(windowHeight);

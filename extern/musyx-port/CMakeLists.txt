@@ -59,17 +59,19 @@ set_target_properties(musyx PROPERTIES DEBUG_POSTFIX D)
 set_target_properties(musyx PROPERTIES RELWITHDEBINFO_POSTFIX RD)
 set_target_properties(musyx PROPERTIES MINSIZEREL_POSTFIX MIN)
 
-# SDL2 is provided by Aurora when MusyX is built as part of the port.
-if (DEFINED AURORA_SDL_TARGET AND TARGET ${AURORA_SDL_TARGET})
-  set(MUSYX_SDL_TARGET ${AURORA_SDL_TARGET})
-elseif (TARGET SDL2::SDL2)
-  set(MUSYX_SDL_TARGET SDL2::SDL2)
+# SDL3 is normally provided by Aurora (FetchContent) when MusyX is built as
+# part of the port; fall back to a standalone find_package otherwise.
+if (DEFINED AURORA_SDL3_TARGET AND TARGET ${AURORA_SDL3_TARGET})
+  set(MUSYX_SDL3_TARGET ${AURORA_SDL3_TARGET})
+elseif (TARGET SDL3::SDL3-static)
+  set(MUSYX_SDL3_TARGET SDL3::SDL3-static)
+elseif (TARGET SDL3::SDL3)
+  set(MUSYX_SDL3_TARGET SDL3::SDL3)
 else ()
-  find_package(PkgConfig REQUIRED)
-  pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET GLOBAL sdl2)
-  set(MUSYX_SDL_TARGET PkgConfig::SDL2)
+  find_package(SDL3 REQUIRED)
+  set(MUSYX_SDL3_TARGET SDL3::SDL3)
 endif ()
-target_link_libraries(musyx PUBLIC ${MUSYX_SDL_TARGET})
+target_link_libraries(musyx PUBLIC ${MUSYX_SDL3_TARGET})
 
 option(MUSYX_BUILD_PLAYER "Build the standalone MusyX sample player" OFF)
 if(MUSYX_BUILD_PLAYER)

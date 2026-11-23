@@ -3,7 +3,7 @@
 // full build (mp_port_audio) has on its include path.
 
 #include "port_mobile.h"
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <aurora/aurora.h>
 #include <aurora/event.h>
 #include <dolphin/pad.h>
@@ -38,7 +38,6 @@
 #include <cstring>
 #include <iterator>
 #include <string>
-#include <thread>
 
 namespace {
 
@@ -464,20 +463,7 @@ void PortRearmPad0() {
 // PortPumpEvents' calls: the frame number the watchdog and the stall line give.
 static unsigned sPumpFrame = 0;
 
-uint64_t PortNowNs() {
-  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                   std::chrono::steady_clock::now().time_since_epoch())
-                                   .count());
-}
-
-bool IsVirtualControllerInstance(SDL_JoystickID instance) {
-  for (int index = 0; index < SDL_NumJoysticks(); ++index) {
-    if (SDL_JoystickGetDeviceInstanceID(index) == instance) {
-      return SDL_JoystickIsVirtual(index) == SDL_TRUE;
-    }
-  }
-  return false;
-}
+uint64_t PortNowNs() { return SDL_GetTicksNS(); }
 
 void PortLogFrameStall(uint64_t loopStartNs, uint64_t eventsDoneNs, uint64_t tickDoneNs, bool drawn) {
   static const bool sLogStalls = [] {
@@ -486,7 +472,7 @@ void PortLogFrameStall(uint64_t loopStartNs, uint64_t eventsDoneNs, uint64_t tic
   }();
   static uint64_t sLastLogNs = 0;
   static uint32_t sUnlogged = 0;
-  const uint64_t endNs = PortNowNs();
+  const uint64_t endNs = SDL_GetTicksNS();
   if (!sLogStalls || endNs - loopStartNs <= 250000000ull) {
     return;
   }
@@ -510,13 +496,13 @@ void PortLogFrameStall(uint64_t loopStartNs, uint64_t eventsDoneNs, uint64_t tic
 void PortPaceFrame() {
   // The iteration's work ends here, before any sleep; its start is where the last call returned.
   static uint64_t sWorkStartNs = 0;
-  const uint64_t workEndNs = PortNowNs();
+  const uint64_t workEndNs = SDL_GetTicksNS();
   if (sWorkStartNs != 0 && workEndNs - sWorkStartNs < 1000000000ull) { // not across a max-speed run
     PortOverlay::NoteFrameWork(workEndNs - sWorkStartNs);
   }
   struct Restart {
     uint64_t& start;
-    ~Restart() { start = PortNowNs(); }
+    ~Restart() { start = SDL_GetTicksNS(); }
   } restart{sWorkStartNs};
   if (!PortOverlay::FrameLimit() || PortHarness::Unpaced()) {
     sNextFrameDeadline = 0;
@@ -524,22 +510,22 @@ void PortPaceFrame() {
   }
   constexpr uint64_t kFramePeriodNs = 1000000000ull / 60;
   if (sNextFrameDeadline == 0) {
-    sNextFrameDeadline = PortNowNs();
+    sNextFrameDeadline = SDL_GetTicksNS();
     return;
   }
   sNextFrameDeadline += kFramePeriodNs;
-  const uint64_t now = PortNowNs();
+  const uint64_t now = SDL_GetTicksNS();
   if (sNextFrameDeadline > now) {
     // SDL_DelayPrecise sleeps in 1 ms slices, about sixteen wake-ups a frame at 60 Hz. One plain
     // sleep up to 2 ms short of the deadline first leaves it only the last stretch, which saves the
     // wake-ups (and battery on phones).
     constexpr uint64_t kCoarseMarginNs = 2000000;
     if (sNextFrameDeadline - now > kCoarseMarginNs) {
-      std::this_thread::sleep_for(std::chrono::nanoseconds(sNextFrameDeadline - now - kCoarseMarginNs));
+      SDL_DelayNS(sNextFrameDeadline - now - kCoarseMarginNs);
     }
-    const uint64_t afterCoarse = PortNowNs();
+    const uint64_t afterCoarse = SDL_GetTicksNS();
     if (sNextFrameDeadline > afterCoarse) {
-      std::this_thread::sleep_for(std::chrono::nanoseconds(sNextFrameDeadline - afterCoarse));
+      SDL_DelayPrecise(sNextFrameDeadline - afterCoarse);
     }
   } else if (now - sNextFrameDeadline > kFramePeriodNs) {
     sNextFrameDeadline = now;
@@ -550,30 +536,27 @@ void PortPaceFrame() {
 // Quick resume on the platforms that background or kill an app: the held snapshot is written when
 // the app goes to the background (it may be killed there), and the marker goes at termination.
 // May run on another thread, so it only flushes what the game thread already took.
-int ResumeEventWatch(void*, SDL_Event* event) {
+bool ResumeEventWatch(void*, SDL_Event* event) {
   switch (event->type) {
-  case SDL_APP_WILLENTERBACKGROUND:
-  case SDL_APP_DIDENTERBACKGROUND:
+  case SDL_EVENT_WILL_ENTER_BACKGROUND:
+  case SDL_EVENT_DID_ENTER_BACKGROUND:
     PortSaveState::ResumeFlush();
     break;
-  case SDL_APP_TERMINATING:
+  case SDL_EVENT_TERMINATING:
     PortSaveState::ResumeShutdown();
     break;
   default:
     break;
   }
-  return 1;
+  return true;
 }
 
 bool PortPumpEvents() {
   // The hang watchdog's heartbeat: the game loop asks this once per iteration, so a frame that
   // never returns here is the one the watchdog reports (phase and stack).
   PortWatchdog::Heartbeat(++sPumpFrame);
-  PortMemoryLog::Tick(PortNowNs());
-  static const bool sWatching = [] {
-    SDL_AddEventWatch(ResumeEventWatch, nullptr);
-    return true;
-  }();
+  PortMemoryLog::Tick(SDL_GetTicksNS());
+  static const bool sWatching = SDL_AddEventWatch(ResumeEventWatch, nullptr);
   (void)sWatching;
   PortWarp::ApplyEnvOnce();
   // The aspect setting: widens the render mode before anything this iteration draws.
@@ -602,11 +585,11 @@ bool PortPumpEvents() {
        ++event) {
     if (event->type == AURORA_SDL_EVENT) {
       const SDL_Event& e = event->sdl;
-      const Uint32 which = e.type == SDL_MOUSEMOTION     ? e.motion.which
-               : e.type == SDL_MOUSEBUTTONDOWN ? e.button.which
-               : e.type == SDL_MOUSEWHEEL      ? e.wheel.which
-                           : SDL_TOUCH_MOUSEID;
-      if (which != SDL_TOUCH_MOUSEID) {
+      const SDL_MouseID which = e.type == SDL_EVENT_MOUSE_MOTION        ? e.motion.which
+                                : e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ? e.button.which
+                                : e.type == SDL_EVENT_MOUSE_WHEEL       ? e.wheel.which
+                                                                        : SDL_TOUCH_MOUSEID;
+      if (which != SDL_TOUCH_MOUSEID && which != SDL_PEN_MOUSEID) {
         mouseInput = true;
       }
     }
@@ -621,7 +604,8 @@ bool PortPumpEvents() {
     // and a release whose press was ImGui's is ignored by the recognizer.
     if (event->type == AURORA_SDL_EVENT) {
       const uint32_t type = event->sdl.type;
-      const bool starts = type == SDL_MOUSEBUTTONDOWN || type == SDL_FINGERDOWN || type == SDL_MOUSEWHEEL;
+      const bool starts = type == SDL_EVENT_MOUSE_BUTTON_DOWN || type == SDL_EVENT_FINGER_DOWN ||
+                          type == SDL_EVENT_MOUSE_WHEEL;
       if (!starts || !PortOverlay::PointerBlocked()) {
         PortPointer::HandleEvent(event->sdl);
       }
@@ -629,8 +613,8 @@ bool PortPumpEvents() {
     if (event->type == AURORA_SDL_EVENT) {
       PortDebug::PhotoTouchEvent(event->sdl);
     }
-    if (event->type == AURORA_SDL_EVENT && event->sdl.type == SDL_MOUSEMOTION &&
-      event->sdl.motion.which != SDL_TOUCH_MOUSEID) {
+    if (event->type == AURORA_SDL_EVENT && event->sdl.type == SDL_EVENT_MOUSE_MOTION &&
+        event->sdl.motion.which != SDL_TOUCH_MOUSEID && event->sdl.motion.which != SDL_PEN_MOUSEID) {
       // Relative motion only, which is what SDL reports while the port holds capture; the
       // game consumes the resulting aim in CPlayer/CFirstPersonCamera.
       PortMouse::AddMotion(event->sdl.motion.xrel, event->sdl.motion.yrel);
@@ -638,32 +622,32 @@ bool PortPumpEvents() {
     // Match MP1's last-used-input policy, excluding virtual pads and drift.
     if (event->type == AURORA_SDL_EVENT) {
       const SDL_Event& input = event->sdl;
-      const bool virtualPad = input.type == SDL_CONTROLLERBUTTONDOWN
-                  ? IsVirtualControllerInstance(input.cbutton.which)
-                  : input.type == SDL_CONTROLLERAXISMOTION &&
-                    IsVirtualControllerInstance(input.caxis.which);
+      const bool virtualPad = input.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN
+                                  ? SDL_IsJoystickVirtual(input.gbutton.which)
+                                  : input.type == SDL_EVENT_GAMEPAD_AXIS_MOTION &&
+                                        SDL_IsJoystickVirtual(input.gaxis.which);
       if (PortTouch::PhysicalEvent(input, PortOverlay::Visible(), virtualPad)) {
         PortTouch::NotePhysicalInput();
       }
       // Every pad plays player 1 outside a multiplayer match (#120): the one just used, the
       // touch pad included, takes pad port 0. Axis motion counts past the drift threshold.
-      if (input.type == SDL_CONTROLLERBUTTONDOWN) {
-        PortInputDevices::NotePadUsed(input.cbutton.which);
-      } else if (input.type == SDL_CONTROLLERAXISMOTION && std::abs(int(input.caxis.value)) > 16000) {
-        PortInputDevices::NotePadUsed(input.caxis.which);
+      if (input.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        PortInputDevices::NotePadUsed(input.gbutton.which);
+      } else if (input.type == SDL_EVENT_GAMEPAD_AXIS_MOTION && std::abs(int(input.gaxis.value)) > 16000) {
+        PortInputDevices::NotePadUsed(input.gaxis.which);
       }
     }
     // MP1's F10: the 60 FPS cap on and off.
-    if (event->type == AURORA_SDL_EVENT && event->sdl.type == SDL_KEYDOWN &&
-      !event->sdl.key.repeat && event->sdl.key.keysym.scancode == SDL_SCANCODE_F10) {
+    if (event->type == AURORA_SDL_EVENT && event->sdl.type == SDL_EVENT_KEY_DOWN &&
+        !event->sdl.key.repeat && event->sdl.key.scancode == SDL_SCANCODE_F10) {
       PortOverlay::SetFrameLimit(!PortOverlay::FrameLimit());
       sNextFrameDeadline = 0;
       std::fprintf(stderr, "Frame limit: %s\n", PortOverlay::FrameLimit() ? "60 FPS" : "unlimited");
     }
     // F11 toggles the Fullscreen setting on desktop; Android has the Video > Display checkbox.
 #if !defined(PORT_MOBILE)
-    if (event->type == AURORA_SDL_EVENT && event->sdl.type == SDL_KEYDOWN &&
-      !event->sdl.key.repeat && event->sdl.key.keysym.scancode == SDL_SCANCODE_F11) {
+    if (event->type == AURORA_SDL_EVENT && event->sdl.type == SDL_EVENT_KEY_DOWN &&
+        !event->sdl.key.repeat && event->sdl.key.scancode == SDL_SCANCODE_F11) {
       SDL_Window* window = SDL_GetWindowFromID(event->sdl.key.windowID);
       if (window != nullptr) {
         const bool full = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;

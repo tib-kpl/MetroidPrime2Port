@@ -12,7 +12,10 @@
 
 #include <imgui.h>
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL_dialog.h>
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_stdinc.h>
+#include <SDL3/SDL_video.h>
 
 #include <algorithm>
 #include <atomic>
@@ -30,9 +33,21 @@ std::optional< std::string > sPrime1DiscPick;
 std::atomic< bool > sPrime1DiscDialogOpen{false}; // read by the frame outside the lock
 
 void OpenPrime1DiscDialog() {
-  std::lock_guard lock(sPrime1DiscMutex);
-  sPrime1DiscPick = std::string();
-  sPrime1DiscDialogOpen = false;
+  int windowCount = 0;
+  SDL_Window** windows = SDL_GetWindows(&windowCount);
+  SDL_Window* window = windows != nullptr && windowCount > 0 ? windows[0] : nullptr;
+  SDL_free(windows);
+  static const SDL_DialogFileFilter filters[] = {
+      {"GameCube disc images", "iso;gcm;ciso;gcz;rvz;wia;nfs"},
+      {"All files", "*"},
+  };
+  const SDL_DialogFileCallback done = [](void*, const char* const* files, int) {
+    std::lock_guard lock(sPrime1DiscMutex);
+    sPrime1DiscPick = files != nullptr && files[0] != nullptr ? std::string(files[0]) : std::string();
+    sPrime1DiscDialogOpen = false;
+  };
+  sPrime1DiscDialogOpen = true;
+  SDL_ShowOpenFileDialog(done, nullptr, window, filters, 2, nullptr, false);
 }
 
 // Prime 1 boost ball's disc: the pick and what was read from it.

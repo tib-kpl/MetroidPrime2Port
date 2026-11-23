@@ -8,7 +8,7 @@
 #include <system_error>
 #include <utility>
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL_filesystem.h>
 
 namespace aurora::io {
 namespace {
@@ -21,16 +21,15 @@ void restore_error(const std::string& error) noexcept {
   }
 }
 
-bool copy_stream(SDL_RWops* src, SDL_RWops* dst) noexcept {
+bool copy_stream(SDL_IOStream* src, SDL_IOStream* dst) noexcept {
   std::array<uint8_t, 64 * 1024> buffer{};
   while (true) {
-    SDL_ClearError();
-    const size_t read = SDL_RWread(src, buffer.data(), 1, buffer.size());
+    const size_t read = SDL_ReadIO(src, buffer.data(), buffer.size());
     if (read > 0 && !write_exact(dst, buffer.data(), read)) {
       return false;
     }
     if (read == 0) {
-      return SDL_GetError()[0] == '\0';
+      return SDL_GetIOStatus(src) == SDL_IO_STATUS_EOF;
     }
   }
 }
@@ -52,26 +51,22 @@ std::filesystem::path fs_path_from_string(std::string_view path) {
   return std::filesystem::path{utf8};
 }
 
-void StreamDeleter::operator()(SDL_RWops* stream) const noexcept {
-  if (stream != nullptr) {
-    SDL_RWclose(stream);
-  }
-}
+void StreamDeleter::operator()(SDL_IOStream* stream) const noexcept { SDL_CloseIO(stream); }
 
 Stream open_file(const std::filesystem::path& path, const char* mode) {
   const auto pathString = fs_path_to_string(path);
-  return Stream{SDL_RWFromFile(pathString.c_str(), mode)};
+  return Stream{SDL_IOFromFile(pathString.c_str(), mode)};
 }
 
-bool read_exact(SDL_RWops* stream, void* dst, size_t size) noexcept {
+bool read_exact(SDL_IOStream* stream, void* dst, size_t size) noexcept {
   if (stream == nullptr || (dst == nullptr && size != 0)) {
-    return SDL_SetError("Invalid %s parameter", stream == nullptr ? "stream" : "destination");
+    return SDL_InvalidParamError(stream == nullptr ? "stream" : "dst");
   }
 
   auto* bytes = static_cast<uint8_t*>(dst);
   size_t total = 0;
   while (total < size) {
-    const size_t read = SDL_RWread(stream, bytes + total, 1, size - total);
+    const size_t read = SDL_ReadIO(stream, bytes + total, size - total);
     if (read == 0) {
       return false;
     }
@@ -80,15 +75,15 @@ bool read_exact(SDL_RWops* stream, void* dst, size_t size) noexcept {
   return true;
 }
 
-bool write_exact(SDL_RWops* stream, const void* src, size_t size) noexcept {
+bool write_exact(SDL_IOStream* stream, const void* src, size_t size) noexcept {
   if (stream == nullptr || (src == nullptr && size != 0)) {
-    return SDL_SetError("Invalid %s parameter", stream == nullptr ? "stream" : "source");
+    return SDL_InvalidParamError(stream == nullptr ? "stream" : "src");
   }
 
   auto* bytes = static_cast<const uint8_t*>(src);
   size_t total = 0;
   while (total < size) {
-    const size_t written = SDL_RWwrite(stream, bytes + total, 1, size - total);
+    const size_t written = SDL_WriteIO(stream, bytes + total, size - total);
     if (written == 0) {
       return false;
     }
@@ -97,19 +92,19 @@ bool write_exact(SDL_RWops* stream, const void* src, size_t size) noexcept {
   return true;
 }
 
-bool read_at(SDL_RWops* stream, uint64_t offset, void* dst, size_t size) noexcept {
+bool read_at(SDL_IOStream* stream, uint64_t offset, void* dst, size_t size) noexcept {
   if (offset > static_cast<uint64_t>(std::numeric_limits<Sint64>::max())) {
     return SDL_SetError("Read offset is too large");
   }
-  return SDL_RWseek(stream, static_cast<Sint64>(offset), RW_SEEK_SET) == static_cast<Sint64>(offset) &&
+  return SDL_SeekIO(stream, static_cast<Sint64>(offset), SDL_IO_SEEK_SET) == static_cast<Sint64>(offset) &&
          read_exact(stream, dst, size);
 }
 
-bool write_at(SDL_RWops* stream, uint64_t offset, const void* src, size_t size) noexcept {
+bool write_at(SDL_IOStream* stream, uint64_t offset, const void* src, size_t size) noexcept {
   if (offset > static_cast<uint64_t>(std::numeric_limits<Sint64>::max())) {
     return SDL_SetError("Write offset is too large");
   }
-  return SDL_RWseek(stream, static_cast<Sint64>(offset), RW_SEEK_SET) == static_cast<Sint64>(offset) &&
+  return SDL_SeekIO(stream, static_cast<Sint64>(offset), SDL_IO_SEEK_SET) == static_cast<Sint64>(offset) &&
          write_exact(stream, src, size);
 }
 
@@ -122,7 +117,7 @@ std::optional<std::vector<uint8_t>> read_file(const std::filesystem::path& path)
       return std::nullopt;
     }
 
-    const Sint64 size = SDL_RWsize(stream.get());
+    const Sint64 size = SDL_GetIOSize(stream.get());
     if (size < 0 || static_cast<uint64_t>(size) > std::vector<uint8_t>{}.max_size()) {
       if (size >= 0) {
         SDL_SetError("File is too large to read into memory");
@@ -150,12 +145,8 @@ bool create_directories(const std::filesystem::path& path) noexcept {
 #if defined(__cpp_exceptions) || defined(_CPPUNWIND)
   try {
 #endif
-    std::error_code error;
-    std::filesystem::create_directories(path, error);
-    if (error) {
-      return SDL_SetError("Failed to create directory: %s", error.message().c_str());
-    }
-    return true;
+    const auto pathString = fs_path_to_string(path);
+    return SDL_CreateDirectory(pathString.c_str());
 #if defined(__cpp_exceptions) || defined(_CPPUNWIND)
   } catch (const std::exception& error) { return SDL_SetError("Failed to encode directory path: %s", error.what()); }
 #endif
@@ -175,7 +166,7 @@ bool write_file(const std::filesystem::path& path, std::span<const uint8_t> data
 
     const bool written = write_exact(stream.get(), data.data(), data.size());
     const std::string writeError = written ? std::string{} : std::string{SDL_GetError()};
-    const bool closed = SDL_RWclose(stream.release()) == 0;
+    const bool closed = SDL_CloseIO(stream.release());
     if (!written) {
       restore_error(writeError);
     }
@@ -212,11 +203,10 @@ AtomicFileWriter& AtomicFileWriter::operator=(AtomicFileWriter&& other) noexcept
 
 void AtomicFileWriter::discard() noexcept {
   if (m_stream) {
-    SDL_RWclose(m_stream.release());
+    SDL_CloseIO(m_stream.release());
   }
   if (!m_temporaryPath.empty()) {
-    std::error_code error;
-    std::filesystem::remove(m_temporaryPath, error);
+    SDL_RemovePath(m_temporaryPath.c_str());
   }
   m_temporaryPath.clear();
   m_targetPath.clear();
@@ -227,19 +217,21 @@ bool AtomicFileWriter::commit() noexcept {
     return SDL_SetError("Atomic file writer is not open");
   }
 
-  const bool closed = SDL_RWclose(m_stream.release()) == 0;
-  if (!closed) {
-    const std::string error{SDL_GetError()};
+  const bool flushed = SDL_FlushIO(m_stream.get());
+  const std::string flushError = flushed ? std::string{} : std::string{SDL_GetError()};
+  const bool closed = SDL_CloseIO(m_stream.release());
+  if (!flushed || !closed) {
+    const std::string error = flushed ? std::string{SDL_GetError()} : flushError;
     discard();
     restore_error(error);
     return false;
   }
 
-  std::error_code renameError;
-  std::filesystem::rename(m_temporaryPath, m_targetPath, renameError);
-  if (renameError) {
+  if (!SDL_RenamePath(m_temporaryPath.c_str(), m_targetPath.c_str())) {
+    const std::string error{SDL_GetError()};
     discard();
-    return SDL_SetError("Failed to atomically replace file: %s", renameError.message().c_str());
+    restore_error(error);
+    return false;
   }
 
   m_temporaryPath.clear();
@@ -259,10 +251,10 @@ AtomicFileWriter open_atomic_file(const std::filesystem::path& path, AtomicFileM
     Stream stream;
     std::string temporaryPath;
     for (uint32_t attempt = 0; attempt < 32 && !stream; ++attempt) {
-      const uint64_t suffix = (SDL_GetPerformanceCounter() << 32) ^
+      const uint64_t suffix = (static_cast<uint64_t>(SDL_rand_bits()) << 32) ^
                               s_temporaryFileCounter.fetch_add(1, std::memory_order_relaxed);
       temporaryPath = targetPath + ".tmp-" + std::to_string(suffix);
-      stream.reset(SDL_RWFromFile(temporaryPath.c_str(), "wb+x"));
+      stream.reset(SDL_IOFromFile(temporaryPath.c_str(), "wb+x"));
     }
     if (!stream) {
       return {};
@@ -274,18 +266,16 @@ AtomicFileWriter open_atomic_file(const std::filesystem::path& path, AtomicFileM
       if (ec) {
         const std::string error = ec.message();
         stream.reset();
-        std::error_code removeError;
-        std::filesystem::remove(temporaryPath, removeError);
+        SDL_RemovePath(temporaryPath.c_str());
         SDL_SetError("Failed to inspect destination: %s", error.c_str());
         return {};
       }
       if (exists || mode == AtomicFileMode::UpdateExisting) {
         auto source = open_file(path, "rb");
-        if (!source || !copy_stream(source.get(), stream.get()) || SDL_RWseek(stream.get(), 0, RW_SEEK_SET) != 0) {
+        if (!source || !copy_stream(source.get(), stream.get()) || SDL_SeekIO(stream.get(), 0, SDL_IO_SEEK_SET) != 0) {
           const std::string error{SDL_GetError()};
           stream.reset();
-          std::error_code removeError;
-          std::filesystem::remove(temporaryPath, removeError);
+          SDL_RemovePath(temporaryPath.c_str());
           restore_error(error);
           return {};
         }

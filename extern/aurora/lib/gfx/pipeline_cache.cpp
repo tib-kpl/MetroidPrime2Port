@@ -28,6 +28,7 @@
 #include <type_traits>
 #include <vector>
 
+#include <SDL3/SDL_iostream.h>
 #if defined(__GLIBC__) || defined(__ANDROID__)
 #include <malloc.h>
 #endif
@@ -71,7 +72,7 @@ struct PipelineCacheWrite {
 
 struct SdlVfsSqliteFile {
   sqlite3_file base;
-  SDL_RWops* io = nullptr;
+  SDL_IOStream* io = nullptr;
 };
 
 static std::mutex g_pipelineMutex;
@@ -144,7 +145,7 @@ static sqlite3_vfs* default_vfs(sqlite3_vfs* vfs) { return static_cast<sqlite3_v
 static int sdl_vfs_close(sqlite3_file* file) {
   auto* vfsFile = sdl_vfs_file(file);
   if (vfsFile->io != nullptr) {
-    SDL_RWclose(vfsFile->io);
+    SDL_CloseIO(vfsFile->io);
     vfsFile->io = nullptr;
   }
   return SQLITE_OK;
@@ -155,17 +156,20 @@ static int sdl_vfs_read(sqlite3_file* file, void* buffer, int amount, sqlite3_in
   if (vfsFile->io == nullptr || offset < 0 || amount < 0) {
     return SQLITE_IOERR_READ;
   }
-  if (SDL_RWseek(vfsFile->io, offset, RW_SEEK_SET) != offset) {
+  if (SDL_SeekIO(vfsFile->io, offset, SDL_IO_SEEK_SET) < 0) {
     return SQLITE_IOERR_SEEK;
   }
 
   auto* dst = static_cast<uint8_t*>(buffer);
   int total = 0;
   while (total < amount) {
-    const size_t read = SDL_RWread(vfsFile->io, dst + total, 1, static_cast<size_t>(amount - total));
+    const size_t read = SDL_ReadIO(vfsFile->io, dst + total, static_cast<size_t>(amount - total));
     if (read == 0) {
-      std::memset(dst + total, 0, static_cast<size_t>(amount - total));
-      return SQLITE_IOERR_SHORT_READ;
+      if (SDL_GetIOStatus(vfsFile->io) == SDL_IO_STATUS_EOF) {
+        std::memset(dst + total, 0, static_cast<size_t>(amount - total));
+        return SQLITE_IOERR_SHORT_READ;
+      }
+      return SQLITE_IOERR_READ;
     }
     if (read > static_cast<size_t>(std::numeric_limits<int>::max() - total)) {
       return SQLITE_IOERR_READ;
@@ -187,7 +191,7 @@ static int sdl_vfs_file_size(sqlite3_file* file, sqlite3_int64* size) {
     return SQLITE_IOERR_FSTAT;
   }
 
-  const auto ioSize = SDL_RWsize(vfsFile->io);
+  const auto ioSize = SDL_GetIOSize(vfsFile->io);
   if (ioSize < 0) {
     return SQLITE_IOERR_FSTAT;
   }
@@ -253,13 +257,11 @@ static int sdl_vfs_open(sqlite3_vfs*, sqlite3_filename name, sqlite3_file* file,
   }
 
   if (std::strcmp(name, EmbeddedSeedName) == 0) {
-    if (g_config.pipelineCacheSeedData != nullptr &&
-        g_config.pipelineCacheSeedSize <= static_cast<size_t>(std::numeric_limits<int>::max())) {
-      vfsFile->io = SDL_RWFromConstMem(g_config.pipelineCacheSeedData,
-                                       static_cast<int>(g_config.pipelineCacheSeedSize));
-    }
+    vfsFile->io = g_config.pipelineCacheSeedData != nullptr
+                      ? SDL_IOFromConstMem(g_config.pipelineCacheSeedData, g_config.pipelineCacheSeedSize)
+                      : nullptr;
   } else {
-    vfsFile->io = SDL_RWFromFile(name, "rb");
+    vfsFile->io = SDL_IOFromFile(name, "rb");
   }
   if (vfsFile->io == nullptr) {
     return SQLITE_CANTOPEN;
@@ -283,10 +285,10 @@ static int sdl_vfs_access(sqlite3_vfs*, const char* name, int flags, int* result
     return SQLITE_OK;
   }
 
-  auto* io = SDL_RWFromFile(name, "rb");
+  auto* io = SDL_IOFromFile(name, "rb");
   *result = io != nullptr ? 1 : 0;
   if (io != nullptr) {
-    SDL_RWclose(io);
+    SDL_CloseIO(io);
   }
   return SQLITE_OK;
 }

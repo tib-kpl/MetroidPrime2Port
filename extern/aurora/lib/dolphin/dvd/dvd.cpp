@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <dolphin/os.h>
 #include <nod.h>
+#include <SDL3/SDL_iostream.h>
 #include <tracy/Tracy.hpp>
 
 #include <atomic>
@@ -21,7 +22,6 @@
 #include <vector>
 
 #include "dvd.hpp"
-#include "../../io.hpp"
 
 #include "../../internal.hpp"
 
@@ -149,20 +149,20 @@ bool isAligned(const void* addr, uintptr_t align) {
 }
 
 int64_t sdlStreamReadAt(void* userData, uint64_t offset, void* out, size_t len) {
-  auto* io = static_cast<SDL_RWops*>(userData);
+  auto* io = static_cast<SDL_IOStream*>(userData);
   if (io == nullptr || out == nullptr ||
       offset > static_cast<uint64_t>(std::numeric_limits<Sint64>::max())) {
     return -1;
   }
 
-  if (SDL_RWseek(io, static_cast<Sint64>(offset), RW_SEEK_SET) != static_cast<Sint64>(offset)) {
+  if (SDL_SeekIO(io, static_cast<Sint64>(offset), SDL_IO_SEEK_SET) < 0) {
     return -1;
   }
 
   size_t total = 0;
   auto* dst = static_cast<uint8_t*>(out);
   while (total < len) {
-    const size_t read = SDL_RWread(io, dst + total, 1, len - total);
+    const size_t read = SDL_ReadIO(io, dst + total, len - total);
     if (read == 0) {
       break;
     }
@@ -172,21 +172,21 @@ int64_t sdlStreamReadAt(void* userData, uint64_t offset, void* out, size_t len) 
 }
 
 int64_t sdlStreamLen(void* userData) {
-  auto* io = static_cast<SDL_RWops*>(userData);
+  auto* io = static_cast<SDL_IOStream*>(userData);
   if (io == nullptr) {
     return -1;
   }
 
-  const Sint64 size = SDL_RWsize(io);
+  const Sint64 size = SDL_GetIOSize(io);
   return size < 0 ? -1 : static_cast<int64_t>(size);
 }
 
 void sdlStreamClose(void* userData) {
-  auto* io = static_cast<SDL_RWops*>(userData);
+  auto* io = static_cast<SDL_IOStream*>(userData);
   if (io == nullptr) {
     return;
   }
-  SDL_RWclose(io);
+  SDL_CloseIO(io);
 }
 
 bool nameEqualsIgnoreCase(const std::string& lhs, const char* rhs, size_t rhsLen) {
@@ -694,13 +694,13 @@ bool aurora_dvd_open(const char* disc_path) {
   s_worker.stop();
   clearState();
 
-  auto io = aurora::io::open_file(aurora::io::fs_path_from_string(disc_path), "rb");
+  SDL_IOStream* io = SDL_IOFromFile(disc_path, "rb");
   if (io == nullptr) {
     return false;
   }
 
   const NodDiscStream stream{
-      .user_data = io.release(),
+      .user_data = io,
       .read_at = sdlStreamReadAt,
       .stream_len = sdlStreamLen,
       .close = sdlStreamClose,
@@ -1232,12 +1232,12 @@ AuroraDiscImage* aurora_disc_image_open(const char* path, char gameId[6], u8* di
   if (path == nullptr) {
     return nullptr;
   }
-  auto io = aurora::io::open_file(aurora::io::fs_path_from_string(path), "rb");
+  SDL_IOStream* io = SDL_IOFromFile(path, "rb");
   if (io == nullptr) {
     return nullptr;
   }
   const NodDiscStream stream{
-      .user_data = io.release(),
+      .user_data = io,
       .read_at = sdlStreamReadAt,
       .stream_len = sdlStreamLen,
       .close = sdlStreamClose,

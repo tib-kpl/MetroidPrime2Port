@@ -12,12 +12,11 @@
 #include "port_overlay.h"
 #include "port_overlay_internal.h"
 #include "port_photo.h"
-#include "port_time.h"
 
 #include "Kyoto/Graphics/CGX.hpp"
 #include "Kyoto/Graphics/CGraphics.hpp"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <aurora/aurora.h>
 #include <aurora/gfx.h>
 #include <dolphin/gx.h>
@@ -368,7 +367,7 @@ void Frame() {
   if (++sFramesSeen == 60) {
     DriverWorkaroundsStarted();
   }
-  const uint64_t now = PortTime::NowNs();
+  const uint64_t now = SDL_GetTicksNS();
   if (sTimingStartNs == 0) {
     sTimingStartNs = now;
     return;
@@ -416,12 +415,8 @@ float DynamicScale() { return sDynScale; }
 double DynamicResTargetFps() {
   double target = PortOverlay::DynamicResTarget();
   if (target <= 0.0) {
-    SDL_DisplayMode mode{};
-    SDL_Window* window = SDL_GetWindowFromID(1);
-    const int display = window != nullptr ? SDL_GetWindowDisplayIndex(window) : 0;
-    target = SDL_GetCurrentDisplayMode(display, &mode) == 0 && mode.refresh_rate > 0
-                 ? mode.refresh_rate
-                 : 60.0;
+    const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+    target = mode != nullptr && mode->refresh_rate > 0.f ? mode->refresh_rate : 60.0;
   }
   const int cap = PortOverlay::FrameLimit() ? 60 : PortOverlay::FpsCap();
   return cap > 0 ? std::min(target, static_cast< double >(cap)) : target;

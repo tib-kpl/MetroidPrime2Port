@@ -13,7 +13,7 @@
 #include "MetroidPrime/SFX/UI3.h"
 #include "MetroidPrime/SFX/UIMemory.h"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <dolphin/pad.h>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -208,7 +208,13 @@ constexpr bool kThemed = true;
 SDL_Window* MainWindow() {
   static SDL_Window* sWindow = nullptr;
   if (sWindow == nullptr) {
-    sWindow = SDL_GetWindowFromID(1);
+    int windowCount = 0;
+    if (SDL_Window** windows = SDL_GetWindows(&windowCount)) {
+      if (windowCount > 0) {
+        sWindow = windows[0];
+      }
+      SDL_free(windows);
+    }
   }
   return sWindow;
 }
@@ -242,14 +248,8 @@ void UpdateUiScale(float userScale) {
   }
   // The overlay works in window coordinates, which on iOS and macOS are points already scaled up by
   // the pixel density (ImGui's framebuffer scale), so take only the remaining content scale.
-  float diagonalDpi = 0.f;
-  float horizontalDpi = 0.f;
-  float verticalDpi = 0.f;
-  float displayScale = 1.f;
-  if (SDL_GetDisplayDPI(SDL_GetWindowDisplayIndex(window), &diagonalDpi, &horizontalDpi, &verticalDpi) == 0 &&
-      horizontalDpi > 0.f) {
-    displayScale = horizontalDpi / 96.f;
-  }
+  const float pixelDensity = SDL_GetWindowPixelDensity(window);
+  float displayScale = SDL_GetWindowDisplayScale(window) / (pixelDensity > 0.f ? pixelDensity : 1.f);
   if (!(displayScale > 0.f)) {
     displayScale = 1.f;
   }
@@ -324,33 +324,33 @@ void UpdateControllerNav() {
   // Navigate with the player's pad (port 0), which can move to a pad connected mid-game.
   const s32 portIndex = PADGetIndexForPort(PAD_CHAN0);
   const u32 padIndex = portIndex >= 0 ? static_cast< u32 >(portIndex) : 0;
-  SDL_GameController* pad = PADGetSDLGamepadForIndex(padIndex);
+  SDL_Gamepad* pad = PADGetSDLGamepadForIndex(padIndex);
   const bool capturing = pad == nullptr || PortInputRemap::Capturing();
-  const auto held = [pad, capturing](SDL_GameControllerButton button) {
-    return !capturing && SDL_GameControllerGetButton(pad, button);
+  const auto held = [pad, capturing](SDL_GamepadButton button) {
+    return !capturing && SDL_GetGamepadButton(pad, button);
   };
-  const auto axis = [pad, capturing](SDL_GameControllerAxis a) {
-    return capturing ? Sint16{0} : SDL_GameControllerGetAxis(pad, a);
+  const auto axis = [pad, capturing](SDL_GamepadAxis a) {
+    return capturing ? Sint16{0} : SDL_GetGamepadAxis(pad, a);
   };
   constexpr Sint16 kStickThreshold = 16000;
   io.AddKeyEvent(ImGuiKey_GamepadDpadUp,
-                 held(SDL_CONTROLLER_BUTTON_DPAD_UP) || axis(SDL_CONTROLLER_AXIS_LEFTY) < -kStickThreshold);
+                 held(SDL_GAMEPAD_BUTTON_DPAD_UP) || axis(SDL_GAMEPAD_AXIS_LEFTY) < -kStickThreshold);
   io.AddKeyEvent(ImGuiKey_GamepadDpadDown,
-                 held(SDL_CONTROLLER_BUTTON_DPAD_DOWN) || axis(SDL_CONTROLLER_AXIS_LEFTY) > kStickThreshold);
+                 held(SDL_GAMEPAD_BUTTON_DPAD_DOWN) || axis(SDL_GAMEPAD_AXIS_LEFTY) > kStickThreshold);
   io.AddKeyEvent(ImGuiKey_GamepadDpadLeft,
-                 held(SDL_CONTROLLER_BUTTON_DPAD_LEFT) || axis(SDL_CONTROLLER_AXIS_LEFTX) < -kStickThreshold);
+                 held(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || axis(SDL_GAMEPAD_AXIS_LEFTX) < -kStickThreshold);
   io.AddKeyEvent(ImGuiKey_GamepadDpadRight,
-                 held(SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || axis(SDL_CONTROLLER_AXIS_LEFTX) > kStickThreshold);
+                 held(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || axis(SDL_GAMEPAD_AXIS_LEFTX) > kStickThreshold);
   // ImGui activates with FaceDown and cancels with FaceRight. On a Nintendo pad (A on the right)
   // confirm on A.
   const PADControllerType padType = pad != nullptr ? PADGetControllerTypeForIndex(padIndex) : PAD_TYPE_UNKNOWN;
   const bool nintendo = padType == PAD_TYPE_SWITCH_PROCON || padType == PAD_TYPE_JOYCON_PAIR;
-  io.AddKeyEvent(ImGuiKey_GamepadFaceDown, held(nintendo ? SDL_CONTROLLER_BUTTON_B : SDL_CONTROLLER_BUTTON_A));
-  io.AddKeyEvent(ImGuiKey_GamepadFaceRight, held(nintendo ? SDL_CONTROLLER_BUTTON_A : SDL_CONTROLLER_BUTTON_B));
-  io.AddKeyEvent(ImGuiKey_GamepadFaceLeft, held(nintendo ? SDL_CONTROLLER_BUTTON_Y : SDL_CONTROLLER_BUTTON_X));
-  io.AddKeyEvent(ImGuiKey_GamepadFaceUp, held(nintendo ? SDL_CONTROLLER_BUTTON_X : SDL_CONTROLLER_BUTTON_Y));
-  io.AddKeyEvent(ImGuiKey_GamepadL1, held(SDL_CONTROLLER_BUTTON_LEFTSHOULDER));
-  io.AddKeyEvent(ImGuiKey_GamepadR1, held(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER));
+  io.AddKeyEvent(ImGuiKey_GamepadFaceDown, held(nintendo ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH));
+  io.AddKeyEvent(ImGuiKey_GamepadFaceRight, held(nintendo ? SDL_GAMEPAD_BUTTON_SOUTH : SDL_GAMEPAD_BUTTON_EAST));
+  io.AddKeyEvent(ImGuiKey_GamepadFaceLeft, held(nintendo ? SDL_GAMEPAD_BUTTON_NORTH : SDL_GAMEPAD_BUTTON_WEST));
+  io.AddKeyEvent(ImGuiKey_GamepadFaceUp, held(nintendo ? SDL_GAMEPAD_BUTTON_WEST : SDL_GAMEPAD_BUTTON_NORTH));
+  io.AddKeyEvent(ImGuiKey_GamepadL1, held(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER));
+  io.AddKeyEvent(ImGuiKey_GamepadR1, held(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER));
 }
 
 ImVec4 ThemeWarnColor(const ImVec4& plain) {

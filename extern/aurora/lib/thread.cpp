@@ -1,6 +1,6 @@
 #include "thread.hpp"
 
-#include <SDL2/SDL_thread.h>
+#include <SDL3/SDL_thread.h>
 #include <tracy/Tracy.hpp>
 
 #include <algorithm>
@@ -289,7 +289,7 @@ void set_current(const Options& options) noexcept {
 #endif
   }
 
-  SDL_SetThreadPriority(to_sdl_priority(options.priority));
+  SDL_SetCurrentThreadPriority(to_sdl_priority(options.priority));
   if (options.affinity == Affinity::SharedCache) {
     pin_shared_cache();
   }

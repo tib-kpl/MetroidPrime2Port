@@ -71,20 +71,13 @@ jobs:
           name: android-apk
           path: dist/*.apk
           if-no-files-found: error
-      # One rolling release: the tag follows the commit, the previous APK goes.
+      # One rolling release: deleted and recreated each time, so the tag follows the commit and the
+      # previous APK goes. GitHub makes the tag itself (a git push of it would need the workflows scope).
       - name: Publish on the latest release
         if: github.event_name == 'push' || github.ref_name == github.event.repository.default_branch
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git tag -f latest "$GITHUB_SHA"
-          git push -f origin refs/tags/latest
           notes="Release APK built from ${GITHUB_SHA::9} ($(git log -1 --format=%s))."
-          if gh release view latest > /dev/null 2>&1; then
-            gh release edit latest --title "Latest build" --notes "$notes" --latest
-            gh release view latest --json assets --jq '.assets[].name' |
-              while read -r name; do gh release delete-asset latest "$name" --yes; done
-          else
-            gh release create latest --verify-tag --title "Latest build" --notes "$notes" --latest
-          fi
-          gh release upload latest dist/*.apk --clobber
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest dist/*.apk --target "$GITHUB_SHA" --title "Latest build" --notes "$notes" --latest

@@ -64,8 +64,12 @@ jobs:
           echo "signer: $digest"
           test "$digest" = 180e4c80415ffc0cff8e9e1d349a5d671e3c6d5ba600113019866ee58b1cf707
           version=$(sed -n 's/.*versionName "\(.*\)".*/\1/p' android/app/build.gradle)
+          code=$(sed -n 's/.*versionCode \([0-9]*\).*/\1/p' android/app/build.gradle)
+          test -n "$version" && test -n "$code"
+          echo "APK_VERSION=$version" >> "$GITHUB_ENV"
+          echo "APK_BUILD=$code" >> "$GITHUB_ENV"
           mkdir dist
-          cp "$apk" "dist/metroid-prime2-port-$version-${GITHUB_SHA::9}.apk"
+          cp "$apk" "dist/metroid-prime2-port-$version-build$code-${GITHUB_SHA::9}.apk"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-apk
@@ -78,6 +82,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes="Release APK built from ${GITHUB_SHA::9} ($(git log -1 --format=%s))."
+          notes="Version $APK_VERSION, build $APK_BUILD (versionCode), commit ${GITHUB_SHA::9}: $(git log -1 --format=%s)"
           gh release delete latest --cleanup-tag --yes || true
-          gh release create latest dist/*.apk --target "$GITHUB_SHA" --title "Latest build" --notes "$notes" --latest
+          gh release create latest dist/*.apk --target "$GITHUB_SHA" --title "v$APK_VERSION (build $APK_BUILD) - ${GITHUB_SHA::9}" --notes "$notes" --latest

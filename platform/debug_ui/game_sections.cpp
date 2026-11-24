@@ -26,6 +26,7 @@
 #include "port_update_check.h"
 #include "port_build_info.h"
 #include "port_env.h"
+#include "port_translate.h"
 
 #include "MetroidPrime/Player/CGameOptions.hpp"
 #include "MetroidPrime/Player/CGameState.hpp"
@@ -59,14 +60,16 @@ void DrawGameSection() {
   ImGui::SeparatorText("Game");
   const std::string shotKeys = PortInputRemap::BindingsText(PortInput::Action::Screenshot, " / ");
   const std::string shotLabel =
-      (shotKeys.empty() ? std::string("Screenshot") : "Screenshot (" + shotKeys + ")") + "###screenshot";
+      (shotKeys.empty() ? std::string("Screenshot") : port::Translate("Screenshot") + (" (" + shotKeys + ")")) +
+      "###screenshot";
   if (ImGui::Button(shotLabel.c_str())) {
     PortPhoto::RequestScreenshot();
   }
   ImGui::SameLine();
   const std::string photoKeys = PortInputRemap::BindingsText(PortInput::Action::PhotoMode, " / ");
   const std::string photoLabel =
-      (photoKeys.empty() ? std::string("Photo mode") : "Photo mode (" + photoKeys + ")") + "###photomode";
+      (photoKeys.empty() ? std::string("Photo mode") : port::Translate("Photo mode") + (" (" + photoKeys + ")")) +
+      "###photomode";
   if (ImGui::Button(photoLabel.c_str())) {
     // The overlay would cover the picture, so it closes; the game tick resolves the request.
     PortPhoto::RequestEnter();
@@ -385,7 +388,8 @@ void DrawTexturesSection() {
   bool enabled = PortTextures::UserPackEnabled();
   const std::string toggleKeys = PortInputRemap::BindingsText(PortInput::Action::ToggleTexturePack, " / ");
   const std::string toggleLabel =
-      (toggleKeys.empty() ? std::string("Use the texture pack") : "Use the texture pack (" + toggleKeys + ")") +
+      (toggleKeys.empty() ? std::string("Use the texture pack")
+                          : port::Translate("Use the texture pack") + (" (" + toggleKeys + ")")) +
       "###texture-pack-enabled";
   if (ImGui::Checkbox(toggleLabel.c_str(), &enabled)) {
     PortTextures::SetUserPackEnabled(enabled);

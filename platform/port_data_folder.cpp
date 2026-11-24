@@ -2,6 +2,7 @@
 #include "port_utf8_path.h"
 #include "port_strings.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -521,13 +522,81 @@ std::string ExportShaderCache(const std::string& dataFolder) {
   return "Copied the shader cache (" + Size(bytes) + ") to " + ToUtf8(to) + ".";
 }
 
+// Calls a no-argument method of MetroidPrime2Activity that returns a String[].
+std::vector< std::string > CallActivityStrings(const char* method) {
+  std::vector< std::string > out;
+  JNIEnv* env = static_cast< JNIEnv* >(SDL_GetAndroidJNIEnv());
+  jobject activity = static_cast< jobject >(SDL_GetAndroidActivity());
+  if (env == nullptr || activity == nullptr) {
+    return out;
+  }
+  jclass cls = env->GetObjectClass(activity);
+  jmethodID id = env->GetMethodID(cls, method, "()[Ljava/lang/String;");
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    id = nullptr;
+  }
+  if (id != nullptr) {
+    jobjectArray array = static_cast< jobjectArray >(env->CallObjectMethod(activity, id));
+    if (env->ExceptionCheck()) {
+      env->ExceptionClear();
+    } else if (array != nullptr) {
+      const jsize count = env->GetArrayLength(array);
+      for (jsize i = 0; i < count; ++i) {
+        jstring item = static_cast< jstring >(env->GetObjectArrayElement(array, i));
+        if (item == nullptr) {
+          continue;
+        }
+        if (const char* text = env->GetStringUTFChars(item, nullptr); text != nullptr) {
+          out.emplace_back(text);
+          env->ReleaseStringUTFChars(item, text);
+        }
+        env->DeleteLocalRef(item);
+      }
+      env->DeleteLocalRef(array);
+    }
+  }
+  env->DeleteLocalRef(cls);
+  env->DeleteLocalRef(activity);
+  return out;
+}
+
+// The folders the data can go to, one per mounted storage volume (the shared internal storage,
+// each SD card or USB drive): <volume>/MetroidPrime2/, trailing separator. Asked at most every
+// two seconds, since a card can be inserted while the panel is open.
+const std::vector< std::string >& MoveTargets() {
+  static std::vector< std::string > sTargets;
+  static uint64_t sLast = 0;
+  const uint64_t now = SDL_GetTicks();
+  if (sLast == 0 || now - sLast > 2000) {
+    sLast = now;
+    sTargets.clear();
+    for (const std::string& root : CallActivityStrings("storageRoots")) {
+      std::error_code ec;
+      std::string resolved = root;
+      if (const fs::path canonical = fs::canonical(FromUtf8(root), ec); !ec) {
+        resolved = ToUtf8(canonical);
+      }
+      const std::string target = WithSeparator(resolved) + "MetroidPrime2/";
+      if (std::find(sTargets.begin(), sTargets.end(), target) == sTargets.end()) {
+        sTargets.push_back(target);
+      }
+    }
+    if (sTargets.empty()) {
+      sTargets.push_back(SharedFolder());
+    }
+  }
+  return sTargets;
+}
+
 // A move to shared storage that waits for "All files access": the panel starts
 // it once the grant shows up, so coming back from the system settings is enough.
-bool sMoveAfterGrant = false;
+// The volume it was asked for, empty when no move waits.
+std::string sMoveAfterGrant;
 
 void RequestMove(const std::string& target, bool needsAccess) {
   Move& move = State();
-  sMoveAfterGrant = false;
+  sMoveAfterGrant.clear();
   if (SameFolder(target, CurrentUserFolder())) {
     std::lock_guard lock(move.mutex);
     move.state = EState::Idle;
@@ -536,7 +605,7 @@ void RequestMove(const std::string& target, bool needsAccess) {
   }
   if (needsAccess && !StorageAccess()) {
     CallActivity("requestStorageAccess", false);
-    sMoveAfterGrant = true;
+    sMoveAfterGrant = target;
     std::lock_guard lock(move.mutex);
     move.state = EState::Idle;
     move.message = "Allow \"All files access\" for Metroid Prime 2 and come back; the copy then starts by itself.";
@@ -561,7 +630,6 @@ void DrawPanel() {
   Move& move = State();
   const std::string current = CurrentUserFolder();
   const std::string priv = PrivateUserFolder();
-  const std::string shared = SharedFolder();
   const bool inPrivate = SameFolder(current, priv);
   ImGui::TextWrapped("Settings, memory card, mods, save states and the texture pack are in %s%s.",
                      current.c_str(), inPrivate ? " (app storage, hidden from file managers)" : "");
@@ -593,16 +661,19 @@ void DrawPanel() {
       ImGui::TextWrapped("%s", message.c_str());
     }
     if (inPrivate) {
-      if (sMoveAfterGrant && StorageAccess()) {
-        RequestMove(shared, true);
+      if (!sMoveAfterGrant.empty() && StorageAccess()) {
+        RequestMove(std::string(sMoveAfterGrant), true);
       }
-      const std::string label = "Move to " + shared;
-      if (ImGui::Button(label.c_str())) {
-        RequestMove(shared, true);
+      // One button per storage volume: the internal storage, and the SD card when there is one.
+      for (const std::string& volume : MoveTargets()) {
+        const std::string label = "Move to " + volume;
+        if (ImGui::Button(label.c_str())) {
+          RequestMove(volume, true);
+        }
       }
       ImGui::TextWrapped(
-          "Copies the data there and restarts. It stays there after an uninstall, and needs the "
-          "\"All files access\" permission.");
+          "Copies the data to the storage you pick (an SD card keeps it off the main memory) and "
+          "restarts. It stays there after an uninstall, and needs the \"All files access\" permission.");
     } else {
       if (ImGui::Button("Move back to app storage")) {
         RequestMove(priv, false);
@@ -613,6 +684,16 @@ void DrawPanel() {
         lock.lock();
         move.message = result;
         lock.unlock();
+      }
+      // Another storage volume than the one the data is on.
+      for (const std::string& volume : MoveTargets()) {
+        if (SameFolder(volume, current)) {
+          continue;
+        }
+        const std::string label = "Move to " + volume;
+        if (ImGui::Button(label.c_str())) {
+          RequestMove(volume, true);
+        }
       }
       // Measured once: walking a big mods folder every frame would stutter,
       // and nothing else writes to app storage while the data is elsewhere.

@@ -633,7 +633,7 @@ if(AURORA_SDL3_TARGET)
         platform/port_gyro_motion.cpp platform/port_steam_triton.cpp
         platform/port_dynamic_res.cpp platform/port_video.cpp platform/port_gpu_driver.cpp platform/port_imgui_fonts.cpp
         platform/port_data_folder.cpp
-        platform/port_json.cpp platform/port_ws.cpp platform/port_update_check.cpp
+        platform/port_json.cpp platform/port_translate.cpp platform/port_ws.cpp platform/port_update_check.cpp
         platform/debug_ui/audio.cpp platform/debug_ui/card_data.cpp platform/debug_ui/cheats.cpp platform/debug_ui/controls.cpp platform/debug_ui/multiplayer.cpp platform/debug_ui/debug.cpp
         platform/debug_ui/enhancements.cpp platform/debug_ui/tracker.cpp
         platform/debug_ui/game_sections.cpp platform/debug_ui/mods.cpp platform/debug_ui/performance.cpp platform/debug_ui/randomizer.cpp
@@ -1033,6 +1033,8 @@ elseif(IOS)
 else()
     add_executable(metroid_prime2_port)
 endif()
+# The menus' translations (translations/*.json), built in.
+include(cmake/PortTranslations.cmake)
 if(WIN32)
     # A GUI program, so Windows opens no console window next to the game (SDL_main supplies
     # WinMain). main() attaches to the parent terminal's console, if any.

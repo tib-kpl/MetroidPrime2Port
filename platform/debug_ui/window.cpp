@@ -6,6 +6,7 @@
 
 #include "port_build_info.h"
 #include "port_env.h"
+#include "port_translate.h"
 #include "port_resume_prompt.h"
 #include "port_skip_prompt.h"
 #include "port_input_remap_ui.h"
@@ -607,6 +608,8 @@ void DrawSkipConfirm() {
 }
 
 void DrawUI() {
+  // The menus in the system's language (translations/*.json); a no-op after the first frame.
+  port::InitTranslations();
   // Not while a control is held: a dragged slider changes a setting every frame. It is saved the
   // frame the control is let go.
   if (PortOverlaySettings::Dirty() && ImGui::GetCurrentContext() != nullptr && !ImGui::IsAnyItemActive()) {

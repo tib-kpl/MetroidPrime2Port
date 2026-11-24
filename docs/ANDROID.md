@@ -125,7 +125,13 @@ panned map reaches the frame's inner edges on both sides.
 
 F1 > System > Data folder (`platform/port_data_folder.cpp`, Android only) moves `user/` (settings,
 memory card, save backups, mods, save states, texture pack) from app storage to
-`/storage/emulated/0/MetroidPrime2/`, and back. The cache folder and `disc.iso` stay in app storage.
+`<volume>/MetroidPrime2/`, and back, for the volume of your choice: one "Move to ..." button per mounted
+volume, the shared internal storage (`/storage/emulated/0`) first, then each SD card or USB drive
+(`MetroidPrime2Activity.storageRoots`, from `getExternalFilesDirs`; the list refreshes every two seconds, so a
+card inserted while the panel is open shows up). With the data on one volume, the other volumes are offered
+too, to move it from the internal storage to the card or back without going through app storage (the copy
+left behind on the first volume is not deleted by the panel; "Delete the old copy" only cleans app storage).
+The cache folder and `disc.iso` stay in app storage.
 Flow: ask for "All files access" (`MANAGE_EXTERNAL_STORAGE`, Android 11+; the legacy storage permission
 on 9/10) through `MetroidPrime2Activity.hasStorageAccess/requestStorageAccess`, copy with a progress bar
 (each file under a `.mpcopy` name, renamed when complete; `.mpcopy_incomplete` marks a cut-short copy),
@@ -135,4 +141,14 @@ offer "Use the data already there" when the target holds data, write the choice 
 (access revoked, reinstall), `ResolveAndroidPaths` (`platform/main.cpp`) runs from app storage that once and
 sets `MP2_USER_UNAVAILABLE`, which the panel reports with buttons to grant access again or stay. Unlike MP1 there is no
 startup dialog for that case and no `data_folder.txt`: `port_paths.txt` is the only marker. Engine test:
-`port_data_folder_tests`. Not run on a device (no installs from this lane).
+`port_data_folder_tests`. Not run on a device (no installs from this lane). Moving to an SD card needs
+"All files access" like the internal storage does; the move itself is the same copy-then-restart.
+
+### Menu language
+
+The F1 menus and the other overlays follow the phone's language (`SDL_GetPreferredLocales`) when
+`translations/<language>.json` exists (French today). The files are built into the executable
+(`cmake/PortTranslations.cmake`), and ImGui looks each text up as it draws it
+(`extern/aurora/extern/imgui_translate.cmake`, `platform/port_translate.cpp`). To add a language,
+see `translations/README.md`. Text drawn by Java is not covered: the on-screen buttons' names and the
+"Add a button" / "Button action" dialog of the touch-controls editor (`TouchControlsView`).
